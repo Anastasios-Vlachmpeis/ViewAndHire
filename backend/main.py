@@ -6,14 +6,15 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
 from backend.db import init_db
-from backend.routers import interviews, listings
+from backend.routers import gaze, interviews, listings
 
 init_db()
 interviews.recover_interrupted_jobs()
 
-app = FastAPI(title="ViewAndHire Mock Interview", version="1.0.0")
+app = FastAPI(title="ViewAndHired Mock Interview", version="1.0.0")
 app.include_router(listings.router)
 app.include_router(interviews.router)
+app.include_router(gaze.router)
 
 frontend = settings.frontend_dir
 app.mount("/css", StaticFiles(directory=frontend / "css"), name="css")

@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Interview Session - ViewAndHire</title>
+  <title>Interview Session - ViewAndHired</title>
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
   <header class="app-header">
-    <a href="/">ViewAndHire</a>
+    <a href="/">ViewAndHired</a>
     <nav>
       <a href="/history">Saved interviews</a>
     </nav>
@@ -21,7 +21,11 @@
       <h2 id="questionText" style="text-align:center;"></h2>
       <div class="preview-wrap" id="previewWrap" hidden>
         <video id="preview" autoplay muted playsinline></video>
+        <div class="face-overlay" id="liveFaceOverlay" hidden>
+          <div class="overlay-labels live-gaze-labels" id="liveGazeLabels"></div>
+        </div>
       </div>
+      <p id="liveGazeStatus" class="muted" style="text-align:center;" hidden></p>
       <div class="actions" style="justify-content:center;">
         <button class="btn btn-primary" id="startBtn">Begin interview</button>
         <button class="btn btn-secondary" id="skipBtn" hidden>Skip question</button>
@@ -40,6 +44,7 @@
     </div>
   </main>
   <script src="/js/api.js"></script>
+  <script src="/js/live-gaze.js"></script>
   <script src="/js/session.js"></script>
 </body>
 </html>

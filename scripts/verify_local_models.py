@@ -60,7 +60,7 @@ def main():
             print(json.dumps({"interview_id": interview_id, "duration": duration,
                               "video_samples": len(times), "last_video_time": times[-1] if times else None,
                               "detected_faces": sum(f["face_detected"] for f in video["frames"]),
-                              "eye_contact_calibration": video.get("calibration"),
+                              "eye_contact_model": video.get("gaze_model"),
                               "answers": answer_checks, "warnings": warnings,
                               "elapsed_seconds": round(time.monotonic() - started, 1),
                               "feedback_api_called": False, "saved_results_changed": False}), flush=True)

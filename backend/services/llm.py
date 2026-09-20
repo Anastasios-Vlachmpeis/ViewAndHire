@@ -175,7 +175,8 @@ Metrics JSON:
 {dumps(payload)}
 
 Null eye-contact scores and uncertain samples are missing evidence, not poor eye contact.
-Head direction is not eye contact. Eye-contact values are calibrated estimates, not ground truth.
+Head direction is not eye contact. Eye-contact values are model estimates, not ground truth.
+When scoring_enabled is false, do not criticize eye contact or recommend changing it based on these experimental estimates.
 Do not infer emotion, confidence, personality, or ability from facial expressions or voice metrics.
 Do not diagnose medical conditions. If there is no recorded answer, say so and focus on preparing a retry.
 """

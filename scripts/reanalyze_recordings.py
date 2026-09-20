@@ -48,6 +48,7 @@ def main():
                 "audio_duration": result["transcript"]["duration"],
                 "transcribed_words": len(result["transcript"]["words"]),
                 "video_frames_analyzed": len(result["face_frames"]),
+                "eye_contact_model": result.get("eye_contact_model"),
                 "answer_word_counts": [len(q["transcript"].split()) for q in result["per_question"]],
                 "aggregate": result["aggregate"],
                 "warnings": result["warnings"],

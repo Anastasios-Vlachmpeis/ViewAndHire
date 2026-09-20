@@ -222,8 +222,8 @@ def run_analysis(
     face_result = {"frames": [], "summary": {"score": None}}
     if record_mode in {"both", "camera"} and recording.exists():
         face_result = face.analyze_video(recording, calibration=calibration)
-        if face_result.get("calibration", {}).get("status") == "unavailable":
-            warnings.append(face_result["calibration"]["reason"])
+        if face_result.get("gaze_model"):
+            warnings.append(face_result["gaze_model"]["reason"])
 
     per_question: list[dict[str, Any]] = []
     total = max(len(selected_questions), 1)
@@ -282,8 +282,8 @@ def run_analysis(
         "transcript": transcript,
         "face_frames": face_result["frames"],
         "face_summary": face_result["summary"],
-        "eye_contact_calibration": face_result.get("calibration"),
-        "analysis_version": 2,
+        "eye_contact_model": face_result.get("gaze_model"),
+        "analysis_version": 3,
         "per_question": per_question,
         "aggregate": aggregate,
         "weak_points": weak_points,

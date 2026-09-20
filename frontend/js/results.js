@@ -134,7 +134,7 @@ function setupOverlay() {
       faceOverlay.style.width = `${w}px`;
       faceOverlay.style.height = `${h}px`;
       const eyeState = frame.eye_contact?.state || "uncertain";
-      const eyeLabels = { toward_lens: "Toward lens", away: "Away", uncertain: "Uncertain" };
+      const eyeLabels = { toward_lens: "Toward camera", away: "Away", uncertain: "Uncertain" };
       const headFacing = frame.head_pose?.facing_camera;
       faceOverlay.style.setProperty("--tracking-color", eyeState === "toward_lens" ? "#22c55e" : eyeState === "away" ? "#f59e0b" : "#94a3b8");
       const labels = `Expression: ${escapeHtml(frame.expression || "unknown")}<br>Head facing camera: ${headFacing == null ? "Uncertain" : headFacing ? "Yes" : "No"}<br>Eye contact (estimate): ${eyeLabels[eyeState] || "Uncertain"}`;
@@ -184,7 +184,11 @@ async function init() {
   }
   analysis = payload.analysis;
   const warnings = document.getElementById("analysisWarnings");
-  warnings.textContent = (analysis.warnings || []).join(" ");
+  warnings.textContent = (analysis.warnings || []).map((warning) =>
+    analysis.eye_contact_calibration?.status === "unavailable" && warning === analysis.eye_contact_calibration.reason
+      ? "Eye-contact estimation is unavailable for this recording. Head direction is shown separately."
+      : warning
+  ).join(" ");
   warnings.hidden = !warnings.textContent;
   faceFrames = analysis.face_frames || [];
   renderAggregate(analysis.aggregate);

@@ -1,7 +1,8 @@
-"""Conservative, per-recording gaze comparison; not a general eye tracker.
+"""Legacy per-recording gaze comparison; not a general eye tracker.
 
 MediaPipe supplies landmarks, not gaze targets. A lens/screen reference and a
 separate repeat check are required before labelling an eye-contact estimate.
+Retained to read historical calibration metadata; new sessions do not calibrate.
 """
 import math
 from typing import Any, Literal
@@ -111,7 +112,7 @@ def fit_reference(frames: list[dict], windows: list[dict]) -> tuple[dict | None,
     def unavailable(reason):
         return None, {"status": "unavailable", "reason": reason}
     if not windows:
-        return unavailable("No calibration was recorded. Retake with eye-contact calibration to enable this estimate.")
+        return unavailable("Eye-contact estimation is unavailable for this recording. Head direction is shown separately and is not used as eye contact.")
     samples = {}
     for window in windows:
         all_samples = [f for f in frames if window["start"] <= f["time"] < window["end"]]

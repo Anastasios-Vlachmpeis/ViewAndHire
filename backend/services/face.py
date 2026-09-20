@@ -1,4 +1,5 @@
 import math
+import logging
 import urllib.request
 from pathlib import Path
 from threading import Lock
@@ -12,7 +13,7 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 from backend.config import settings
-from backend.services import gaze
+from backend.services import gaze, intel_gaze
 
 FER_MODEL_URL = (
     "https://github.com/opencv/opencv_zoo/raw/main/models/"
@@ -22,6 +23,7 @@ FER_MODEL_URL = (
 EXPRESSION_LABELS = ["angry", "disgust", "fearful", "happy", "neutral", "sad", "surprised"]
 
 _weights_lock = Lock()
+logger = logging.getLogger(__name__)
 
 
 def _download_weight(url: str, target: Path) -> Path:
@@ -108,6 +110,15 @@ def analyze_video(video_path: Path, sample_fps: float = 5.0, calibration: list[d
     if not math.isfinite(sample_fps) or sample_fps <= 0:
         raise ValueError("sample_fps must be positive and finite")
     frames: list[dict[str, Any]] = []
+    windows = gaze.validate_calibration(calibration or [])
+    smoother = intel_gaze.GazeSmoother()
+    model_status = intel_gaze.model_status()
+    try:
+        gaze_model = intel_gaze.get_estimator()
+    except intel_gaze.GazeUnavailable:
+        logger.exception("Local gaze models unavailable")
+        gaze_model = None
+        model_status = intel_gaze.model_status(False)
     with av.open(str(video_path)) as container:
         if not container.streams.video:
             raise ValueError("Recording has no video track")
@@ -136,7 +147,8 @@ def analyze_video(video_path: Path, sample_fps: float = 5.0, calibration: list[d
                 entry = {"time": round(time, 3), "face_detected": False, "bbox": None,
                          "expression": None, "expression_confidence": 0.0,
                          "head_pose": gaze.head_orientation(None),
-                         "_eyes": {"values": None, "reason": "face_unavailable"}}
+                         "eye_contact": intel_gaze.uncertain("model_unavailable"),
+                         "calibration_frame": bool(windows and time < windows[-1]["end"])}
                 if result.face_landmarks:
                     landmarks = result.face_landmarks[0]
                     if net is None:
@@ -144,13 +156,22 @@ def analyze_video(video_path: Path, sample_fps: float = 5.0, calibration: list[d
                     expression, confidence = _predict_expression(frame, landmarks, net)
                     entry.update(face_detected=True, bbox=_bbox_from_landmarks(landmarks, width, height),
                                  expression=expression, expression_confidence=round(confidence, 3),
-                                 head_pose=gaze.head_orientation(next(iter(getattr(result, "facial_transformation_matrixes", [])), None)),
-                                 _eyes=gaze.eye_features(landmarks, width, height))
+                                 head_pose=gaze.head_orientation(next(iter(getattr(result, "facial_transformation_matrixes", [])), None)))
+                if gaze_model is not None:
+                    try:
+                        gaze_frame = gaze_model.analyze(frame)
+                        entry["eye_contact"] = smoother.update(gaze_frame["eye_contact"], time)
+                        if gaze_frame["face_detected"]:
+                            entry.update(face_detected=True, bbox=gaze_frame["bbox"], head_pose=gaze_frame["head_pose"])
+                    except Exception:
+                        logger.exception("Local gaze inference failed")
+                        gaze_model = None
+                        model_status = intel_gaze.model_status(False)
+                        entry["eye_contact"] = intel_gaze.uncertain("model_unavailable")
                 frames.append(entry)
     if not frames:
         raise ValueError("Recording contains no decodable video frames")
-    calibration_status = gaze.apply_eye_contact(frames, gaze.validate_calibration(calibration or []))
-    return {"frames": frames, "summary": summarize_frames(frames), "calibration": calibration_status}
+    return {"frames": frames, "summary": summarize_frames(frames), "gaze_model": model_status}
 
 
 def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
@@ -163,7 +184,8 @@ def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
                  if f.get("eye_contact", {}).get("state") in {"toward_lens", "away"}]
     coverage = len(eye_known) / len(frames) if frames else 0.0
     ratio = eye_known.count("toward_lens") / len(eye_known) if eye_known else None
-    score = ratio * 100 if ratio is not None and coverage >= 0.5 and len(eye_known) >= 10 else None
+    scoring_enabled = not any(f.get("eye_contact", {}).get("scoring_eligible") is False for f in frames)
+    score = ratio * 100 if scoring_enabled and ratio is not None and coverage >= 0.5 and len(eye_known) >= 10 else None
     return {
         "score": round(score, 1) if score is not None else None,
         "face_visible_ratio": round(face_visible_ratio, 3),
@@ -172,6 +194,8 @@ def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
         "eye_contact_coverage": round(coverage, 3),
         "eye_contact_sample_count": len(eye_known),
         "sample_count": len(frames),
-        "notes": "Estimated lens gaze among clear samples; uncertain frames are excluded. Head orientation is separate."
-                 if score is not None else "Eye-contact score unavailable: needs calibration and enough clear eye samples.",
+        "scoring_enabled": scoring_enabled,
+        "notes": "Eye contact is a model estimate and does not affect your score." if not scoring_enabled else
+                 "Estimated lens gaze among clear samples; uncertain frames are excluded. Head orientation is separate."
+                 if score is not None else "Eye-contact score unavailable; head direction is measured separately.",
     }

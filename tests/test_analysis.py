@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from backend import db
 from backend.config import settings
 from backend.routers import interviews
-from backend.services import asr, face, llm, scoring, voice
+from backend.services import asr, face, intel_gaze, llm, scoring, voice
 from backend.services.json_io import dumps, write_json
 
 
@@ -161,6 +161,13 @@ class TranscriptAndScoringTests(unittest.TestCase):
 
 
 class FaceTests(unittest.TestCase):
+    def setUp(self):
+        estimator = MagicMock()
+        estimator.analyze.return_value = {"face_detected": False, "eye_contact": intel_gaze.uncertain("face_unavailable")}
+        self.gaze_patch = patch.object(intel_gaze, "get_estimator", return_value=estimator)
+        self.gaze_patch.start()
+        self.addCleanup(self.gaze_patch.stop)
+
     def fake_container(self):
         container = MagicMock()
         container.__enter__.return_value = container
