@@ -1,7 +1,7 @@
-import random
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from openai import APIError, AuthenticationError
 
 from backend import db
 from backend.models import ListingCreate
@@ -25,6 +25,15 @@ def generate_questions(listing_id: str) -> dict[str, Any]:
         questions = llm.generate_questions(listing["job_text"], listing.get("company"), listing.get("role_title"))
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except AuthenticationError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="OpenAI rejected the API key. Check OPENAI_API_KEY in .env, then restart the server.",
+        ) from exc
+    except APIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not parse generated questions: {exc}") from exc
     bank = db.save_question_bank(listing_id, questions)
     return bank
 

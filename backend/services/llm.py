@@ -21,6 +21,22 @@ def _extract_json(text: str) -> Any:
     return json.loads(text)
 
 
+def _complete(messages: list[dict[str, str]], json_mode: bool = False) -> str:
+    kwargs: dict[str, Any] = {
+        "model": settings.openai_model,
+        "messages": messages,
+        "max_completion_tokens": 4000,
+    }
+    # GPT-5.6 family only allows default temperature (1) and is a reasoning model.
+    model = settings.openai_model.lower()
+    if model.startswith("gpt-5") or model.startswith("gpt-6"):
+        kwargs["reasoning_effort"] = "none"
+    if json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
+    response = _client().chat.completions.create(**kwargs)
+    return response.choices[0].message.content or ""
+
+
 def generate_questions(job_text: str, company: str | None, role_title: str | None) -> list[dict[str, Any]]:
     prompt = f"""You are an expert interview coach. Given this job listing, generate 12-15 likely pre-screening video interview questions.
 
@@ -30,7 +46,7 @@ Role: {role_title or "Unknown"}
 Job listing:
 {job_text}
 
-Return JSON array only. Each item:
+Return a JSON object with a "questions" array. Each item:
 {{
   "id": "q1",
   "question": "...",
@@ -40,16 +56,15 @@ Return JSON array only. Each item:
   "scoring_hints": "what a strong answer should include"
 }}
 """
-    response = _client().chat.completions.create(
-        model=settings.openai_model,
-        messages=[
+    content = _complete(
+        [
             {"role": "system", "content": "Return valid JSON only."},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.7,
+        json_mode=True,
     )
-    content = response.choices[0].message.content or "[]"
-    questions = _extract_json(content)
+    parsed = _extract_json(content or "{}")
+    questions = parsed.get("questions", parsed) if isinstance(parsed, dict) else parsed
     if not isinstance(questions, list):
         raise ValueError("LLM did not return a question list")
     for idx, q in enumerate(questions, start=1):
@@ -78,16 +93,14 @@ Return JSON only:
   "notes": "2-3 sentences on strengths and gaps"
 }}
 """
-    response = _client().chat.completions.create(
-        model=settings.openai_model,
-        messages=[
+    content = _complete(
+        [
             {"role": "system", "content": "Return valid JSON only. Be fair but constructive."},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.3,
+        json_mode=True,
     )
-    content = response.choices[0].message.content or "{}"
-    return _extract_json(content)
+    return _extract_json(content or "{}")
 
 
 def generate_overview(
@@ -112,12 +125,9 @@ Metrics JSON:
 Cover: overall impression, top strengths, top weak points to practice, and 3 concrete next steps.
 Do not diagnose medical conditions. Use phrasing like "delivery signals" not clinical labels.
 """
-    response = _client().chat.completions.create(
-        model=settings.openai_model,
-        messages=[
+    return _complete(
+        [
             {"role": "system", "content": "You are a supportive interview coach."},
             {"role": "user", "content": prompt},
-        ],
-        temperature=0.5,
-    )
-    return response.choices[0].message.content or "No overview generated."
+        ]
+    ) or "No overview generated."
