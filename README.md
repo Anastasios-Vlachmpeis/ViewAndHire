@@ -7,7 +7,7 @@ Local mock video interview practice app. Paste a job listing, generate role-spec
 - **Frontend:** vanilla HTML, CSS, JavaScript
 - **Backend:** FastAPI, SQLite, local file storage
 - **LLM:** OpenAI-compatible API (questions, answer scoring, feedback overview only)
-- **ML:** faster-whisper (transcription), Parselmouth (voice), Intel OpenVINO (gaze/head pose/eye state), MediaPipe + OpenCV ONNX (expressions)
+- **ML:** faster-whisper (transcription), Parselmouth (descriptive voice measurements), Intel OpenVINO (gaze/head pose/eye state), MediaPipe blendshapes (neutral facial movement)
 
 ## Prerequisites
 
@@ -64,6 +64,8 @@ Recordings stay in `data/interviews/`. Job listing text, questions, transcripts,
 - Feedback contains one strength and three next-attempt actions (at most 25 words each). Per-answer notes are limited to 45 words. Malformed or overlong feedback gets one automatic repair attempt.
 
 ## Verification
+
+The [competency framework implementation](docs/competency-framework-implementation.md) separates neutral delivery observations from transcript-only behavioral evidence. In version 4, answer quality is the only overall score; competency levels require a relevant question and quoted example, action, reasoning and outcome. Missing evidence is unscored. Re-analyze recording refreshes older results and backs up the previous analysis.
 
 Run the regression suites from the project root:
 

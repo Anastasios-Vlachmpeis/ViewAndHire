@@ -81,7 +81,8 @@ class GazeTests(unittest.TestCase):
         gaze.apply_eye_contact(frames, windows())
         result = face.summarize_frames(frames)
         self.assertEqual(result["sample_count"], 21)
-        self.assertEqual(result["score"], 100)
+        self.assertIsNone(result["score"])
+        self.assertEqual(result["eye_contact_ratio"], 1)
         self.assertEqual(result["eye_contact_sample_count"], 20)
         for f in frames[-15:]:
             f["eye_contact"]["state"] = "uncertain"

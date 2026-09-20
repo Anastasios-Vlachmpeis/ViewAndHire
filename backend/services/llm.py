@@ -173,7 +173,9 @@ def generate_overview(
     weak_points: list[dict[str, Any]],
 ) -> str:
     payload = {
-        "per_question": per_question,
+        # Keep biometric/acoustic data and proposed rewrites out of semantic coaching.
+        "per_question": [{"question": q.get("question"), "transcript": q.get("transcript"),
+                          "notes": q.get("answer_quality", {}).get("notes")} for q in per_question],
         "aggregate": aggregate,
         "weak_points": weak_points,
     }
@@ -191,10 +193,7 @@ Job context (truncated):
 Metrics JSON:
 {dumps(payload)}
 
-Null eye-contact scores and uncertain samples are missing evidence, not poor eye contact.
-Head direction is not eye contact. Eye-contact values are model estimates, not ground truth.
-When scoring_enabled is false, do not criticize eye contact or recommend changing it based on these experimental estimates.
-Do not infer emotion, confidence, personality, or ability from facial expressions or voice metrics.
+Assess only how clearly this answer presents evidence. Do not infer personality, private emotion or employability.
 Do not diagnose medical conditions. If there is no recorded answer, say so and focus on preparing a retry.
 """
     result = _validated_feedback(

@@ -114,16 +114,17 @@ test("paused, ended and frozen video clear contact without sending duplicate fra
   s.overlay.stop();
 });
 
-test("emotion labels reflect the current expression and abstain on unclear samples", async () => {
+test("movement labels use blendshapes and never reuse legacy emotion labels", async () => {
   const s = harness(); s.overlay.start();
-  s.known.expression = "happy"; s.known.expression_confidence = .8;
+  s.known.expression = "happy"; s.known.facial_movement = { state: "active" };
   await s.fire();
-  assert.match(s.labels.textContent, /Emotion \(estimate\): happy/);
-  s.known.expression_confidence = .3;
+  assert.match(s.labels.textContent, /Facial movement: Active/);
+  assert.doesNotMatch(s.labels.textContent, /happy|Emotion/);
+  s.known.facial_movement = { state: "uncertain" };
   s.at(200); await s.fire();
-  assert.match(s.labels.textContent, /Emotion \(estimate\): Uncertain/);
-  s.known.expression = null;
+  assert.match(s.labels.textContent, /Facial movement: Uncertain/);
+  delete s.known.facial_movement;
   s.at(400); await s.fire();
-  assert.match(s.labels.textContent, /Emotion \(estimate\): Uncertain/);
+  assert.match(s.labels.textContent, /Facial movement: Uncertain/);
   s.overlay.stop();
 });

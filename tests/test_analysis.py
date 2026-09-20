@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from backend import db
 from backend.config import settings
 from backend.routers import interviews
-from backend.services import asr, face, intel_gaze, llm, scoring, voice
+from backend.services import asr, competencies, face, intel_gaze, llm, scoring, voice
 from backend.services.json_io import dumps, write_json
 
 
@@ -70,7 +70,7 @@ class AudioTests(unittest.TestCase):
     def test_silence_and_short_audio_do_not_score_as_confident(self):
         for samples in [np.zeros(16000), np.ones(900) * 0.1, np.zeros(1), np.zeros(0)]:
             result = voice.analyze_audio_segment(str(self.make_wav(samples)))
-            self.assertEqual(result["score"], 0)
+            self.assertIsNone(result["score"])
             dumps(result)
 
     def test_voiced_audio_metrics_are_finite(self):
@@ -78,7 +78,8 @@ class AudioTests(unittest.TestCase):
         result = voice.analyze_audio_segment(str(self.make_wav(0.2 * np.sin(2 * np.pi * 150 * t))),
                                              "I built and tested the application")
         self.assertGreater(result["features"]["mean_f0"], 140)
-        self.assertLessEqual(result["score"], 100)
+        self.assertIsNone(result["score"])
+        self.assertNotIn("confidence_proxy", result["features"])
         dumps(result)
 
     def test_corrupt_recording_fails(self):
@@ -131,9 +132,9 @@ class TranscriptAndScoringTests(unittest.TestCase):
     def test_aggregate_weights_and_missing_modalities(self):
         item = {"question_id": "q1", "answer_quality": {"overall": 80},
                 "speech_delivery": {"score": 60}, "face_gaze": {"score": 40}}
-        self.assertEqual(scoring.aggregate_scores([item], "both")["overall"], 63)
+        self.assertEqual(scoring.aggregate_scores([item], "both")["overall"], 80)
         item["face_gaze"]["score"] = None
-        self.assertEqual(scoring.aggregate_scores([item], "mic")["overall"], 70.7)
+        self.assertEqual(scoring.aggregate_scores([item], "mic")["overall"], 80)
         self.assertNotIn("q1_face", [m["metric"] for m in scoring.compute_weak_points([item])])
 
     def test_json_rejects_nonfinite_numbers_and_handles_numpy(self):
@@ -211,15 +212,18 @@ class FaceTests(unittest.TestCase):
         tracker.__exit__.assert_called_once()
         container.__exit__.assert_called_once()
 
-    def test_expression_preprocessing_and_confidence(self):
-        net = MagicMock()
-        net.forward.return_value = np.array([[0, -1, -2, 4, 1, 0, -1]], dtype=np.float32)
-        landmarks = [SimpleNamespace(x=0.5, y=0.5)] * 478
-        with patch.object(face.cv2, "estimateAffinePartial2D", return_value=(np.eye(2, 3), None)):
-            label, confidence = face._predict_expression(np.full((112, 112, 3), 255, np.uint8), landmarks, net)
-        self.assertEqual(label, "happy")
-        self.assertTrue(0 < confidence < 1)
-        np.testing.assert_allclose(net.setInput.call_args.args[0], 1)
+    def test_movement_coefficients_abstain_when_missing_and_never_describe_emotion(self):
+        names = ["jawOpen", "mouthSmileLeft", "mouthSmileRight", "browInnerUp", "browOuterUpLeft", "browOuterUpRight", "eyeBlinkLeft", "eyeBlinkRight"]
+        shapes = [SimpleNamespace(category_name=name, score=.1) for name in names]
+        result = SimpleNamespace(face_blendshapes=[shapes])
+        self.assertEqual(face.movement_summary(result)["state"], "low")
+        shapes[0].score = .8
+        movement = face.movement_summary(result)
+        self.assertEqual(movement["observations"], ["jaw opening"])
+        self.assertFalse(movement["scoring_enabled"])
+        shapes[0].score = float("nan")
+        self.assertEqual(face.movement_summary(result)["state"], "uncertain")
+        self.assertEqual(face.movement_summary(None)["state"], "uncertain")
 
     def test_no_face_and_no_frames_are_unavailable_not_poor_eye_contact(self):
         self.assertIsNone(face.summarize_frames([])["score"])
@@ -251,6 +255,7 @@ class PipelineAndApiTests(unittest.TestCase):
         score = {"adequacy": 80, "specificity": 70, "structure": 75, "ambiguity_penalty": 0, "overall": 75, "notes": "Good", "suggested_answer": "I built this. [Add the actual outcome.]"}
         for mode in ["mic", "both", "camera"]:
             with patch.object(asr, "transcribe_audio", return_value=transcript), \
+                 patch.object(competencies, "assess_answer", return_value=competencies.unavailable()), \
                  patch.object(llm, "_complete", side_effect=[json.dumps(score), json.dumps({"keep": "Specific example", "actions": ["Describe your role.", "Explain the result.", "Practise once aloud."]})]), \
                  patch.object(face, "analyze_video", return_value={"frames": [], "summary": {"score": None}}) as video:
                 result = scoring.run_analysis(self.iid, self.directory, QUESTIONS,

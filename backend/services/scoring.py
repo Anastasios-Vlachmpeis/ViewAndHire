@@ -1,6 +1,8 @@
 import math
 import json
 import wave
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -8,16 +10,10 @@ import av
 import numpy as np
 
 from backend.config import settings
-from backend.services import asr, face, gaze, llm, voice
+from backend.services import asr, competencies, face, gaze, llm, voice
 from backend.services.json_io import dumps, write_json
 
 ProgressCallback = Callable[[str, int, str], None]
-
-AGGREGATE_WEIGHTS = {
-    "answer_quality": 0.40,
-    "speech_delivery": 0.35,
-    "face_gaze": 0.25,
-}
 
 
 def _write_pcm_wav(path: Path, samples: np.ndarray, sample_rate: int = 16000) -> None:
@@ -134,15 +130,11 @@ def compute_weak_points(per_question: list[dict[str, Any]]) -> list[dict[str, An
     for q in per_question:
         qid = q["question_id"]
         answer = q.get("answer_quality", {})
-        speech = q.get("speech_delivery", {})
-        face_data = q.get("face_gaze", {})
         metrics.extend(
             [
                 {"metric": f"{qid}_adequacy", "label": "Answer adequacy", "score": answer.get("adequacy", 0)},
                 {"metric": f"{qid}_specificity", "label": "Answer specificity", "score": answer.get("specificity", 0)},
                 {"metric": f"{qid}_structure", "label": "Answer structure", "score": answer.get("structure", 0)},
-                {"metric": f"{qid}_delivery", "label": "Speech delivery", "score": speech.get("score", 0)},
-                {"metric": f"{qid}_face", "label": "Estimated eye contact", "score": face_data.get("score")},
             ]
         )
     metrics = [m for m in metrics if m["score"] is not None]
@@ -151,39 +143,10 @@ def compute_weak_points(per_question: list[dict[str, Any]]) -> list[dict[str, An
 
 
 def aggregate_scores(per_question: list[dict[str, Any]], record_mode: str) -> dict[str, Any]:
-    answer_scores = [q["answer_quality"]["overall"] for q in per_question if q.get("answer_quality")]
-    speech_scores = [
-        q["speech_delivery"]["score"]
-        for q in per_question
-        if q.get("speech_delivery") and q["speech_delivery"].get("score") is not None
-    ]
-    face_scores = [
-        q["face_gaze"]["score"]
-        for q in per_question
-        if q.get("face_gaze") and q["face_gaze"].get("score") is not None
-    ]
-
-    answer_avg = sum(answer_scores) / len(answer_scores) if answer_scores else 0.0
-    speech_avg = sum(speech_scores) / len(speech_scores) if speech_scores else None
-    face_avg = sum(face_scores) / len(face_scores) if face_scores else None
-
-    parts = [(answer_avg, AGGREGATE_WEIGHTS["answer_quality"])]
-    weight_sum = AGGREGATE_WEIGHTS["answer_quality"]
-    if speech_avg is not None and record_mode in {"both", "mic", "camera"}:
-        parts.append((speech_avg, AGGREGATE_WEIGHTS["speech_delivery"]))
-        weight_sum += AGGREGATE_WEIGHTS["speech_delivery"]
-    if face_avg is not None and record_mode in {"both", "camera"}:
-        parts.append((face_avg, AGGREGATE_WEIGHTS["face_gaze"]))
-        weight_sum += AGGREGATE_WEIGHTS["face_gaze"]
-
-    overall = sum(score * weight for score, weight in parts) / weight_sum if weight_sum else answer_avg
-    return {
-        "overall": round(overall, 1),
-        "answer_quality": round(answer_avg, 1),
-        "speech_delivery": round(speech_avg, 1) if speech_avg is not None else None,
-        "face_gaze": round(face_avg, 1) if face_avg is not None else None,
-    }
-
+    # Delivery observations and competency evidence never enter the answer-quality score.
+    scores = [q["answer_quality"]["overall"] for q in per_question if q.get("answer_quality")]
+    average = round(sum(scores) / len(scores), 1) if scores else 0.0
+    return {"overall": average, "answer_quality": average, "speech_delivery": None, "face_gaze": None}
 
 def run_analysis(
     interview_id: str,
@@ -201,6 +164,11 @@ def run_analysis(
         write_json(status_path, {"stage": stage, "percent": percent, "message": message})
 
     report("extract", 5, "Extracting audio...")
+    previous_analysis = interview_dir / "analysis.json"
+    if previous_analysis.exists():
+        backup = interview_dir / "analysis_backups" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup.mkdir(parents=True)
+        shutil.copy2(previous_analysis, backup / "analysis.json")
     recording = interview_dir / "recording.webm"
     wav_path = interview_dir / "recording.wav"
     if not recording.exists():
@@ -248,6 +216,7 @@ def run_analysis(
             speech = voice.analyze_audio_segment(str(segment_wav), q_transcript)
 
         answer_quality = llm.score_answer(question["question"], question.get("scoring_hints", ""), q_transcript)
+        competency_evidence = competencies.assess_answer(question["question"], q_transcript)
 
         q_face_frames = [f for f in face_result["frames"] if start <= f["time"] < end]
         face_summary = face.summarize_frames(q_face_frames)
@@ -268,6 +237,7 @@ def run_analysis(
                     "suggested_answer": answer_quality.get("suggested_answer"),
                 },
                 "speech_delivery": speech,
+                "competency_evidence": competency_evidence,
                 "face_gaze": face_summary,
             }
         )
@@ -284,7 +254,7 @@ def run_analysis(
         "face_frames": face_result["frames"],
         "face_summary": face_result["summary"],
         "eye_contact_model": face_result.get("gaze_model"),
-        "analysis_version": 3,
+        "analysis_version": 4,
         "per_question": per_question,
         "aggregate": aggregate,
         "weak_points": weak_points,

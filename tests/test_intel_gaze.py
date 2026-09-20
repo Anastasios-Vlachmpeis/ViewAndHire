@@ -152,16 +152,16 @@ class LiveFrameApiTests(unittest.TestCase):
             load.assert_not_called()
         self.assertFalse(api._frame_lock.locked())
 
-    def test_expression_is_returned_and_its_failure_does_not_hide_gaze(self):
+    def test_movement_is_returned_and_its_failure_does_not_hide_gaze(self):
         estimator = MagicMock()
         estimator.analyze.side_effect = lambda *args, **kwargs: {"face_detected": True, "eye_contact": gaze.uncertain("borderline_gaze")}
-        with patch.object(gaze, "get_estimator", return_value=estimator), patch.object(api, "live_expression", return_value={"expression": "happy", "expression_confidence": .8}):
+        with patch.object(gaze, "get_estimator", return_value=estimator), patch.object(api, "live_movement", return_value={"facial_movement": {"state": "active"}}):
             result = self.post(self.jpeg()).json()
-            self.assertEqual(result["expression"], "happy")
-        with patch.object(gaze, "get_estimator", return_value=estimator), patch.object(api, "live_expression", side_effect=RuntimeError("model failed")), self.assertLogs(api.logger, "ERROR"):
+            self.assertEqual(result["facial_movement"]["state"], "active")
+        with patch.object(gaze, "get_estimator", return_value=estimator), patch.object(api, "live_movement", side_effect=RuntimeError("model failed")), self.assertLogs(api.logger, "ERROR"):
             response = self.post(self.jpeg())
             self.assertEqual(response.status_code, 200)
-            self.assertIsNone(response.json()["expression"])
+            self.assertEqual(response.json()["facial_movement"]["state"], "uncertain")
             self.assertEqual(response.json()["eye_contact"]["state"], "uncertain")
 
     def test_model_failure_and_busy_requests_are_retryable(self):

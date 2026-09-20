@@ -33,7 +33,7 @@ def _custom_question_item(text: str, used_ids: set[str]) -> dict[str, Any]:
 
 
 def _append_custom_questions(existing: list[dict[str, Any]], texts: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    seen_text = {_question_key(q["question"]) for q in existing}
+    seen_text = {_question_key(q["question"]) for q in existing if not q.get("deleted")}
     used_ids = {q["id"] for q in existing}
     added: list[dict[str, Any]] = []
     for text in texts:
@@ -93,18 +93,48 @@ def get_listing(listing_id: str) -> dict[str, Any]:
 
 @router.post("/banks/{bank_id}/custom-questions")
 def add_custom_questions(bank_id: str, payload: CustomQuestionsAdd) -> dict[str, Any]:
-    bank = db.get_question_bank(bank_id)
-    if not bank:
+    def append(existing):
+        questions, added = _append_custom_questions(existing, payload.questions)
+        if not added:
+            raise HTTPException(status_code=400, detail="Those questions are already in the bank.")
+        return questions, {"added": added}
+    result = db.edit_question_bank(bank_id, append)
+    if result is None:
         raise HTTPException(status_code=404, detail="Question bank not found")
-    questions, added = _append_custom_questions(bank["questions"], payload.questions)
-    if not added:
-        raise HTTPException(status_code=400, detail="Those questions are already in the bank.")
-    updated = db.update_question_bank(bank_id, questions)
+    bank = result["bank"]
     listing = db.get_listing(bank["listing_id"])
     if listing is not None:
-        custom_texts = [q["question"] for q in questions if q.get("source") == "custom"]
+        custom_texts = [q["question"] for q in bank["questions"] if q.get("source") == "custom"]
         db.update_listing_custom_questions(bank["listing_id"], custom_texts)
-    return {"bank": updated, "added": added}
+    return result
+
+
+@router.delete("/banks/{bank_id}/questions/{question_id}")
+def delete_question(bank_id: str, question_id: str) -> dict[str, Any]:
+    def remove(questions):
+        question = next((q for q in questions if q["id"] == question_id), None)
+        if question is None:
+            raise HTTPException(status_code=404, detail="Question not found")
+        question["deleted"] = True
+        return questions, {"deleted_id": question_id}
+    result = db.edit_question_bank(bank_id, remove)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Question bank not found")
+    return result
+
+
+@router.post("/banks/{bank_id}/questions/{question_id}/restore")
+def restore_question(bank_id: str, question_id: str) -> dict[str, Any]:
+    def restore(questions):
+        question = next((q for q in questions if q["id"] == question_id), None)
+        if question is None:
+            raise HTTPException(status_code=404, detail="Question not found")
+        question.pop("deleted", None)
+        return questions, {"restored_id": question_id}
+    result = db.edit_question_bank(bank_id, restore)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Question bank not found")
+    return result
 
 
 @router.get("/banks/{bank_id}")

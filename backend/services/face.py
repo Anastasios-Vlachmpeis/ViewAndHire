@@ -15,13 +15,6 @@ from mediapipe.tasks.python import vision
 from backend.config import settings
 from backend.services import gaze, intel_gaze
 
-FER_MODEL_URL = (
-    "https://github.com/opencv/opencv_zoo/raw/main/models/"
-    "facial_expression_recognition/facial_expression_recognition_mobilefacenet_2022july.onnx"
-)
-
-EXPRESSION_LABELS = ["angry", "disgust", "fearful", "happy", "neutral", "sad", "surprised"]
-
 _weights_lock = Lock()
 logger = logging.getLogger(__name__)
 
@@ -46,6 +39,7 @@ def _get_landmarker() -> vision.FaceLandmarker:
         num_faces=1,
         running_mode=vision.RunningMode.VIDEO,
         output_facial_transformation_matrixes=True,
+        output_face_blendshapes=True,
     )
     return vision.FaceLandmarker.create_from_options(options)
 
@@ -64,20 +58,32 @@ def _landmarker_model_path() -> str:
     return str(target)
 
 
-def _get_fer() -> cv2.dnn.Net:
-    path = _download_weight(FER_MODEL_URL, settings.weights_dir / "fer_mobilefacenet.onnx")
-    # setInput/forward mutate the network, so use one network per analysis.
-    return cv2.dnn.readNet(str(path))
+def movement_summary(result):
+    """Neutral geometry observations; coefficient cutoffs are display rules only."""
+    groups = {"jaw opening": ("jawOpen",), "mouth-corner movement": ("mouthSmileLeft", "mouthSmileRight"),
+              "brow raising": ("browInnerUp", "browOuterUpLeft", "browOuterUpRight"),
+              "eyelid closure": ("eyeBlinkLeft", "eyeBlinkRight")}
+    output = {"state": "uncertain", "observations": [], "coefficients": {}, "scoring_enabled": False}
+    shapes = getattr(result, "face_blendshapes", []) if result else []
+    if not shapes:
+        return output
+    values = {c.category_name: float(c.score) for c in shapes[0]}
+    names = {name for group in groups.values() for name in group}
+    if any(name not in values or not math.isfinite(values[name]) or not 0 <= values[name] <= 1 for name in names):
+        return output
+    output["coefficients"] = {name: round(values[name], 3) for name in sorted(names)}
+    output["observations"] = [label for label, group in groups.items() if max(values[name] for name in group) >= .5]
+    output["state"] = "active" if output["observations"] else "low"
+    return output
 
 
-class LiveExpressionEstimator:
+class LiveMovementEstimator:
     """Independent still-image tracking; serialize shared mutable networks."""
     def __init__(self):
         self.lock = Lock()
-        self.net = _get_fer()
         self.landmarker = vision.FaceLandmarker.create_from_options(vision.FaceLandmarkerOptions(
             base_options=python.BaseOptions(model_asset_path=_landmarker_model_path()),
-            num_faces=1, running_mode=vision.RunningMode.IMAGE,
+            num_faces=1, running_mode=vision.RunningMode.IMAGE, output_face_blendshapes=True,
         ))
 
     def analyze(self, frame):
@@ -85,9 +91,8 @@ class LiveExpressionEstimator:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             result = self.landmarker.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
             if not result.face_landmarks:
-                return {"expression": None, "expression_confidence": 0.0}
-            label, confidence = _predict_expression(frame, result.face_landmarks[0], self.net)
-            return {"expression": label, "expression_confidence": round(confidence, 3)}
+                return {"facial_movement": movement_summary(None)}
+            return {"facial_movement": movement_summary(result)}
 
 
 def _bbox_from_landmarks(landmarks: list, width: int, height: int) -> dict[str, float]:
@@ -100,30 +105,6 @@ def _bbox_from_landmarks(landmarks: list, width: int, height: int) -> dict[str, 
     x0, x1 = np.clip([x_min - pad_x, x_max + pad_x], 0, width)
     y0, y1 = np.clip([y_min - pad_y, y_max + pad_y], 0, height)
     return {"x": float(x0), "y": float(y0), "w": float(x1 - x0), "h": float(y1 - y0)}
-
-
-def _predict_expression(frame: np.ndarray, landmarks: list, net: cv2.dnn.Net) -> tuple[str | None, float]:
-    height, width = frame.shape[:2]
-    points = np.array([(lm.x * width, lm.y * height) for lm in landmarks], dtype=np.float32)
-    # Align eyes, nose and mouth to the model's five-point face template.
-    source = np.array([(points[33] + points[133]) / 2, (points[362] + points[263]) / 2,
-                       points[1], points[61], points[291]], dtype=np.float32)
-    target = np.array([[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366],
-                       [41.5493, 92.3655], [70.7299, 92.2041]], dtype=np.float32)
-    transform, _ = cv2.estimateAffinePartial2D(source, target, method=cv2.LMEDS)
-    if transform is None or not np.isfinite(transform).all():
-        return None, 0.0
-    aligned = cv2.warpAffine(frame, transform, (112, 112))
-    blob = cv2.dnn.blobFromImage(aligned, 1.0 / 127.5, (112, 112), (127.5, 127.5, 127.5), swapRB=True)
-    net.setInput(blob)
-    scores = net.forward().reshape(-1)
-    if len(scores) != len(EXPRESSION_LABELS) or not np.isfinite(scores).all():
-        raise ValueError("Expression model returned invalid scores")
-    # The network emits logits, not calibrated probabilities.
-    probabilities = np.exp(scores - scores.max())
-    probabilities /= probabilities.sum()
-    idx = int(np.argmax(scores))
-    return EXPRESSION_LABELS[idx], float(probabilities[idx])
 
 
 def analyze_video(video_path: Path, sample_fps: float = 5.0, calibration: list[dict] | None = None) -> dict[str, Any]:
@@ -149,7 +130,6 @@ def analyze_video(video_path: Path, sample_fps: float = 5.0, calibration: list[d
         origin = float(container.start_time or 0) / av.time_base
         last_time, last_ms, next_sample = -1.0, -1, 0.0
         with _get_landmarker() as landmarker:
-            net = None
             for index, decoded in enumerate(container.decode(video=0)):
                 time = float(decoded.time) - origin if decoded.time is not None else index / native_fps
                 if not math.isfinite(time) or time < 0 or time <= last_time:
@@ -165,17 +145,14 @@ def analyze_video(video_path: Path, sample_fps: float = 5.0, calibration: list[d
                 result = landmarker.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp_ms)
                 height, width = frame.shape[:2]
                 entry = {"time": round(time, 3), "face_detected": False, "bbox": None,
-                         "expression": None, "expression_confidence": 0.0,
+                         "facial_movement": movement_summary(None),
                          "head_pose": gaze.head_orientation(None),
                          "eye_contact": intel_gaze.uncertain("model_unavailable"),
                          "calibration_frame": bool(windows and time < windows[-1]["end"])}
                 if result.face_landmarks:
                     landmarks = result.face_landmarks[0]
-                    if net is None:
-                        net = _get_fer()
-                    expression, confidence = _predict_expression(frame, landmarks, net)
                     entry.update(face_detected=True, bbox=_bbox_from_landmarks(landmarks, width, height),
-                                 expression=expression, expression_confidence=round(confidence, 3),
+                                 facial_movement=movement_summary(result),
                                  head_pose=gaze.head_orientation(next(iter(getattr(result, "facial_transformation_matrixes", [])), None)))
                 if gaze_model is not None:
                     try:
@@ -204,18 +181,14 @@ def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
                  if f.get("eye_contact", {}).get("state") in {"toward_lens", "away"}]
     coverage = len(eye_known) / len(frames) if frames else 0.0
     ratio = eye_known.count("toward_lens") / len(eye_known) if eye_known else None
-    scoring_enabled = not any(f.get("eye_contact", {}).get("scoring_eligible") is False for f in frames)
-    score = ratio * 100 if scoring_enabled and ratio is not None and coverage >= 0.5 and len(eye_known) >= 10 else None
     return {
-        "score": round(score, 1) if score is not None else None,
+        "score": None,
         "face_visible_ratio": round(face_visible_ratio, 3),
         "head_facing_ratio": round(sum(head_known) / len(head_known), 3) if head_known else None,
         "eye_contact_ratio": round(ratio, 3) if ratio is not None else None,
         "eye_contact_coverage": round(coverage, 3),
         "eye_contact_sample_count": len(eye_known),
         "sample_count": len(frames),
-        "scoring_enabled": scoring_enabled,
-        "notes": "Eye contact is a model estimate and does not affect your score." if not scoring_enabled else
-                 "Estimated lens gaze among clear samples; uncertain frames are excluded. Head orientation is separate."
-                 if score is not None else "Eye-contact score unavailable; head direction is measured separately.",
+        "scoring_enabled": False,
+        "notes": "Eye contact is a model estimate and does not affect your score.",
     }

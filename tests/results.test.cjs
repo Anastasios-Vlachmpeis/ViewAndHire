@@ -24,4 +24,11 @@ test("suggested answers render safely and older results remain readable", () => 
   assert.match(html, /At the hackathon, we built &lt;script&gt;/);
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /\[Add the outcome\.\]/);
+  question.competency_evidence = { assessments: { empathy: { label: "Empathy and Social Awareness", status: "not_assessed", level: null, question_fit_reason: "Technical question", confidence: "insufficient", evidence: [], missing_evidence: [], coaching_action: "Choose an interpersonal example." }, resilience: { label: "Positivity and Resilience", status: "insufficient_evidence", level: null, question_fit_reason: "Missing outcome", confidence: "insufficient", evidence: [{ anchor: "action", quote: '<script>bad</script>' }], missing_evidence: ["State the outcome."], coaching_action: "Name what happened." } } };
+  context.renderBreakdown([question]);
+  const evidence = elements.get("questionBreakdown").innerHTML;
+  assert.match(evidence, /Not assessed for this question/);
+  assert.match(evidence, /Insufficient evidence/);
+  assert.doesNotMatch(evidence, /level 0|Speech delivery:|<script>/);
+  assert.match(evidence, /&lt;script&gt;bad/);
 });

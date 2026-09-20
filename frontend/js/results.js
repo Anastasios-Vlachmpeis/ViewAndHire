@@ -15,10 +15,7 @@ let faceFrames = [];
 
 function renderAggregate(agg) {
   const cards = [
-    { label: "Overall", value: agg.overall },
     { label: "Answer quality", value: agg.answer_quality },
-    { label: "Speech delivery", value: agg.speech_delivery },
-    { label: "Eye contact (estimate)", value: analysis?.analysis_version >= 2 ? agg.face_gaze : null },
   ];
   aggregateScores.innerHTML = cards
     .filter((c) => c.value !== null && c.value !== undefined)
@@ -33,6 +30,7 @@ function renderAggregate(agg) {
 }
 
 function renderWeakPoints(points) {
+  points = points.filter((p) => !/_(delivery|face)$/.test(p.metric));
   if (!points.length) {
     weakPoints.innerHTML = "<p class='muted'>No weak points identified yet.</p>";
     return;
@@ -67,6 +65,37 @@ function renderTimeline(perQuestion) {
   });
 }
 
+function renderCompetencies(bundle) {
+  if (!bundle) return '<p class="muted">Competency evidence was not assessed in this older analysis. Re-analyze to add it.</p>';
+  return `<details class="feedback-details"><summary>Competency evidence in this answer</summary>
+    <p class="muted">Practice feedback from your words only. These provisional rubrics describe evidence in an answer, not your personality or employability. No combined competency score.</p>
+    ${Object.values(bundle.assessments || {}).map((item) => {
+      if (item.status === "not_assessed") return `<section class="competency-evidence"><h4>${escapeHtml(item.label)}</h4><p><strong>Not assessed for this question</strong></p><p class="muted">${escapeHtml(item.question_fit_reason)}</p></section>`;
+      const labels = { assessed: item.level === 3 ? "Strong evidence · level 3/3" : "Evidence with gaps · level 2/3", not_assessed: "Not assessed for this question", insufficient_evidence: "Insufficient evidence" };
+      return `<section class="competency-evidence"><h4>${escapeHtml(item.label)}</h4>
+        <p><strong>${labels[item.status] || "Insufficient evidence"}</strong></p>
+        <p class="muted">${escapeHtml(item.question_fit_reason)} Confidence: ${escapeHtml(item.confidence)} (not a calibrated probability).</p>
+        ${(item.evidence || []).map((span) => `<p><strong>${escapeHtml(span.anchor)}:</strong> <q>${escapeHtml(span.quote)}</q></p>`).join("")}
+        ${item.missing_evidence?.length ? `<p><strong>Missing evidence:</strong> ${item.missing_evidence.map(escapeHtml).join(" ")}</p>` : ""}
+        <p><strong>Next attempt:</strong> ${escapeHtml(item.coaching_action)}</p></section>`;
+    }).join("")}</details>`;
+}
+
+function renderDelivery(q) {
+  const features = q.speech_delivery?.features || {};
+  const face = q.face_gaze || {};
+  const number = (value, suffix) => Number.isFinite(value) ? `${value}${suffix}` : "Unavailable";
+  return `<details class="feedback-details"><summary>Optional delivery observations</summary>
+    <p class="muted">Observations only. These do not measure emotion, confidence or competency and do not affect answer scores. There is no ideal population target.</p>
+    <p>Speaking rate during voiced time: ${number(features.speaking_rate_wps, " words/second")}</p>
+    <p>Detected pauses: ${number(features.pause_count, "")}; average pause: ${number(features.mean_pause_duration, " seconds")}</p>
+    <p>Pitch variation: ${number(features.f0_stdev, " Hz")}; volume variation: ${number(features.intensity_stdev, " dB")}</p>
+    <p>Eye contact (estimate): ${face.eye_contact_ratio != null ? `${Math.round(face.eye_contact_ratio * 100)}% of clear samples` : "Uncertain"}; clear samples: ${Math.round((face.eye_contact_coverage || 0) * 100)}%</p>
+    <p>Head facing camera: ${face.head_facing_ratio != null ? `${Math.round(face.head_facing_ratio * 100)}%` : "Uncertain"}</p>
+    <p class="muted">Optional practice: try a pause between ideas, vary emphasis on a key point, or adjust camera framing. Compare with your own earlier attempts.</p>
+  </details>`;
+}
+
 function renderBreakdown(perQuestion) {
   questionBreakdown.innerHTML = perQuestion
     .map(
@@ -83,13 +112,10 @@ function renderBreakdown(perQuestion) {
             <div>Structure ${Math.round(q.answer_quality.structure)}</div>
           </div>
           <div>
-            <strong>Speech delivery: ${q.speech_delivery.score !== null ? Math.round(q.speech_delivery.score) : "N/A"}</strong>
-            <p class="muted">${q.speech_delivery.notes || ""}</p>
-            <div>Eye contact (estimate): ${q.face_gaze.eye_contact_ratio != null ? `${Math.round(q.face_gaze.eye_contact_ratio * 100)}% of clear samples` : "Uncertain"}</div>
-            <div class="muted">Clear eye samples: ${Math.round((q.face_gaze.eye_contact_coverage || 0) * 100)}% of this answer</div>
-            <div class="muted">Head facing camera: ${q.face_gaze.head_facing_ratio != null ? `${Math.round(q.face_gaze.head_facing_ratio * 100)}%` : "Uncertain"}</div>
+            ${renderDelivery(q)}
           </div>
         </div>
+        ${renderCompetencies(q.competency_evidence)}
         ${q.answer_quality.suggested_answer ? `<div class="suggested-answer">
           <h4>Suggested answer</h4>
           <p>${escapeHtml(q.answer_quality.suggested_answer)}</p>
@@ -142,8 +168,8 @@ function setupOverlay() {
       const eyeLabels = { toward_lens: "Toward camera", away: "Away", uncertain: "Uncertain" };
       const headFacing = frame.head_pose?.facing_camera;
       faceOverlay.style.setProperty("--tracking-color", eyeState === "toward_lens" ? "#22c55e" : eyeState === "away" ? "#f59e0b" : "#94a3b8");
-      const emotion = frame.expression && frame.expression_confidence >= .5 ? frame.expression : "Uncertain";
-      const labels = `Emotion (estimate): ${escapeHtml(emotion)}<br>Head facing camera: ${headFacing == null ? "Uncertain" : headFacing ? "Yes" : "No"}<br>Eye contact (estimate): ${eyeLabels[eyeState] || "Uncertain"}`;
+      const movement = { active: "Active", low: "Low", uncertain: "Uncertain" }[frame.facial_movement?.state] || "Uncertain";
+      const labels = `Facial movement: ${movement}<br>Head facing camera: ${headFacing == null ? "Uncertain" : headFacing ? "Yes" : "No"}<br>Eye contact (estimate): ${eyeLabels[eyeState] || "Uncertain"}`;
       if (overlayLabels.innerHTML !== labels) overlayLabels.innerHTML = labels;
       // Attach above the face border, or inside its top edge near the video boundary.
       faceOverlay.dataset.labelInside = "false";
@@ -161,6 +187,18 @@ function setupOverlay() {
   if (replayVideo.readyState >= 1) start();
   window.addEventListener("pagehide", () => cancelAnimationFrame(animationId), { once: true });
 }
+
+document.getElementById("reanalyzeBtn").addEventListener("click", async () => {
+  const button = document.getElementById("reanalyzeBtn");
+  button.disabled = true;
+  try {
+    await api(`/api/interviews/${interviewId}/analyze`, { method: "POST" });
+    window.location.href = `/session?id=${encodeURIComponent(interviewId)}`;
+  } catch (err) {
+    saveStatus.textContent = err.message;
+    button.disabled = false;
+  }
+});
 
 saveBtn.addEventListener("click", async () => {
   saveBtn.disabled = true;

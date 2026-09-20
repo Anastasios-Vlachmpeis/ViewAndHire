@@ -25,7 +25,7 @@ async function loadHistory() {
           <div class="muted">${escapeHtml(formatDate(item.created_at))} · ${item.question_count} questions practised · ${item.question_bank_count} in saved bank</div>
         </div>
         <div>
-          <div style="font-weight:700; color:${scoreColor(item.aggregate_score || 0)}">${item.aggregate_score ?? "--"}</div>
+          <div style="font-weight:700; color:${scoreColor(item.aggregate_score || 0)}">Answer quality: ${item.aggregate_score ?? "--"}</div>
           <a class="btn btn-secondary" href="/results?id=${encodeURIComponent(item.id)}">Open</a>
           <a class="btn btn-secondary" href="/settings?retakeId=${encodeURIComponent(item.id)}">Retake</a>
         </div>

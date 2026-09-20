@@ -20,6 +20,14 @@
 * {
   box-sizing: border-box;
   font-family: inherit;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 html,
@@ -29,6 +37,8 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .container {
@@ -140,6 +150,10 @@ textarea {
   color: var(--danger);
 }
 
+.btn[hidden] {
+  display: none;
+}
+
 .btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -161,6 +175,23 @@ textarea {
   border-radius: 3px;
   padding: 12px;
   margin-bottom: 10px;
+}
+
+.question-bank-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.question-bank-row > label {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.question-bank-row > button {
+  flex-shrink: 0;
 }
 
 .question-item.selected {

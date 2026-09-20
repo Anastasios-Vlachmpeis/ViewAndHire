@@ -54,13 +54,16 @@
         <p id="addQuestionsStatus" class="muted" role="status" aria-live="polite"></p>
       </div>
       <div id="pickQuestionsWrap" hidden style="margin-top: 16px;">
-        <h3>Select questions (predetermined mode)</h3>
-        <p class="muted">Choose up to 20 questions. The interview will include every checked question.</p>
+        <h3 id="pickQuestionsHeading">Select questions</h3>
+        <p class="muted" id="pickQuestionsHelp">Choose up to 20 questions. The interview will include every checked question.</p>
+        <p class="muted">Delete removes a question from this bank for future attempts. Previous recordings and results are kept.</p>
         <div class="actions" id="retakeActions" hidden>
           <button type="button" class="btn btn-secondary" id="previousQuestionsBtn">Use previous questions</button>
           <button type="button" class="btn btn-secondary" id="clearQuestionsBtn">Clear selection</button>
         </div>
         <div id="pickQuestionsList"></div>
+        <p id="deleteQuestionStatus" class="muted" role="status" aria-live="polite"></p>
+        <button type="button" class="btn btn-secondary" id="undoDeleteBtn" hidden>Undo deletion</button>
       </div>
       <div class="actions">
         <button type="button" class="btn btn-primary" id="startBtn">Start interview</button>

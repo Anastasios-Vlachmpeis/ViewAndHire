@@ -117,8 +117,22 @@ def get_question_bank(bank_id: str) -> dict[str, Any] | None:
     if not row:
         return None
     data = dict(row)
-    data["questions"] = json.loads(data.pop("questions_json"))
+    data["questions"] = [q for q in json.loads(data.pop("questions_json")) if not q.get("deleted")]
     return data
+
+
+def edit_question_bank(bank_id: str, edit):
+    """Serialize bank edits, retaining deleted entries to reserve historical IDs."""
+    with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM question_banks WHERE id = ?", (bank_id,)).fetchone()
+        if row is None:
+            return None
+        bank = dict(row)
+        questions, details = edit(json.loads(bank.pop("questions_json")))
+        conn.execute("UPDATE question_banks SET questions_json = ? WHERE id = ?", (json.dumps(questions), bank_id))
+        bank["questions"] = [q for q in questions if not q.get("deleted")]
+        return {"bank": bank, **details}
 
 
 def update_question_bank(bank_id: str, questions: list[dict[str, Any]]) -> dict[str, Any] | None:

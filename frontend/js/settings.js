@@ -14,40 +14,100 @@ const statusEl = document.getElementById("status");
 const saveNewQuestionsBtn = document.getElementById("saveNewQuestionsBtn");
 const newCustomQuestions = document.getElementById("newCustomQuestions");
 const addQuestionsStatus = document.getElementById("addQuestionsStatus");
+const deleteQuestionStatus = document.getElementById("deleteQuestionStatus");
+const undoDeleteBtn = document.getElementById("undoDeleteBtn");
 
 let questions = [];
 let previousIds = [];
 let addingQuestions = false;
 let creatingInterview = false;
+let deletingQuestion = false;
+let lastDeleted = null;
 startBtn.disabled = true;
 saveNewQuestionsBtn.disabled = true;
 
 function syncSelection() {
   const predetermined = selectionModeEl.value === "predetermined";
-  pickQuestionsWrap.hidden = !predetermined;
+  pickQuestionsWrap.hidden = false;
+  pickQuestionsList.querySelectorAll("input").forEach((input) => { input.disabled = !predetermined; });
+  document.getElementById("pickQuestionsHeading").textContent = predetermined ? "Select questions" : "Question bank";
+  document.getElementById("pickQuestionsHelp").textContent = predetermined
+    ? "Choose up to 20 questions. Every checked question will be included."
+    : "Random mode chooses from this bank. Delete any questions you do not want included.";
   questionCountEl.disabled = predetermined;
   questionCountEl.max = Math.min(20, Math.max(1, questions.length));
   if (predetermined) {
     questionCountEl.value = pickQuestionsList.querySelectorAll("input:checked").length;
   } else {
-    questionCountEl.value = Math.max(1, Math.min(Number(questionCountEl.value) || 1, questions.length, 20));
+    questionCountEl.value = questions.length ? Math.max(1, Math.min(Number(questionCountEl.value) || 1, questions.length, 20)) : 0;
   }
+  startBtn.disabled = addingQuestions || creatingInterview || deletingQuestion || !questions.length;
 }
 
 function renderPickList(selectedIds = null) {
   pickQuestionsList.innerHTML = questions
     .map(
       (q, idx) => `
-      <label class="question-item">
+      <div class="question-item question-bank-row">
+      <label>
         <input type="checkbox" data-id="${escapeHtml(q.id)}" ${(selectedIds ? selectedIds.has(q.id) : retakeId ? previousIds.includes(q.id) : idx < 5) ? "checked" : ""}>
         <span class="badge">${q.source === "custom" ? "Your question" : escapeHtml(q.type)}</span>
         ${q.source === "custom" ? "" : `<span class="badge">${escapeHtml(q.likelihood)}/5</span>`}
         ${previousIds.includes(q.id) ? '<span class="badge">Used last time</span>' : ""}
         ${escapeHtml(q.question)}
-      </label>`
+      </label>
+      <button type="button" class="btn btn-danger" data-delete-id="${escapeHtml(q.id)}" aria-label="Delete question: ${escapeHtml(q.question)}">Delete</button>
+      </div>`
     )
-    .join("");
+    .join("") || '<p class="muted">No questions left. Add a question above or undo the last deletion.</p>';
 }
+
+function updateBank(bank, selectedIds) {
+  const byId = new Map(bank.questions.map((q) => [q.id, q]));
+  questions = [...previousIds.map((id) => byId.get(id)).filter(Boolean), ...bank.questions.filter((q) => !previousIds.includes(q.id))];
+  setSession("questionBank", bank);
+  renderPickList(selectedIds);
+  const description = document.getElementById("retakeDescription");
+  if (retakeId) description.textContent = `Choose from ${questions.length} saved questions. Deleted questions stay in previous results but are excluded from future attempts.`;
+  syncSelection();
+}
+
+async function changeQuestion(questionId, restore = false) {
+  if (addingQuestions || creatingInterview || deletingQuestion) return;
+  const selectedBefore = new Set([...pickQuestionsList.querySelectorAll("input:checked")].map((input) => input.dataset.id));
+  deletingQuestion = true;
+  startBtn.disabled = true;
+  saveNewQuestionsBtn.disabled = true;
+  undoDeleteBtn.disabled = true;
+  deleteQuestionStatus.textContent = restore ? "Restoring question..." : "Deleting question...";
+  try {
+    const result = await api(`/api/listings/banks/${encodeURIComponent(bankId)}/questions/${encodeURIComponent(questionId)}${restore ? "/restore" : ""}`, { method: restore ? "POST" : "DELETE" });
+    const selected = new Set([...pickQuestionsList.querySelectorAll("input:checked")].map((input) => input.dataset.id));
+    if (restore) {
+      if (lastDeleted?.selected && selected.size < 20) selected.add(questionId);
+      lastDeleted = null;
+    } else {
+      lastDeleted = { id: questionId, selected: selectedBefore.has(questionId) };
+      selected.delete(questionId);
+    }
+    updateBank(result.bank, selected);
+    undoDeleteBtn.hidden = !lastDeleted;
+    deleteQuestionStatus.textContent = restore ? "Question restored." : "Question deleted from this bank. Previous attempts are unchanged.";
+  } catch (err) {
+    deleteQuestionStatus.textContent = err.message;
+  } finally {
+    deletingQuestion = false;
+    saveNewQuestionsBtn.disabled = false;
+    undoDeleteBtn.disabled = false;
+    syncSelection();
+  }
+}
+
+pickQuestionsList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-delete-id]");
+  if (button) return changeQuestion(button.dataset.deleteId);
+});
+undoDeleteBtn.addEventListener("click", () => { if (lastDeleted) return changeQuestion(lastDeleted.id, true); });
 
 selectionModeEl.addEventListener("change", syncSelection);
 pickQuestionsList.addEventListener("change", syncSelection);
@@ -62,7 +122,7 @@ document.getElementById("clearQuestionsBtn").addEventListener("click", () => {
   syncSelection();
 });
 async function addQuestions() {
-  if (addingQuestions || creatingInterview) return false;
+  if (addingQuestions || creatingInterview || deletingQuestion) return false;
   const textarea = newCustomQuestions;
   const texts = textarea.value.split(/\r?\n/).map((question) => question.trim()).filter(Boolean);
   if (!texts.length) {
@@ -119,9 +179,9 @@ async function addQuestions() {
     return false;
   } finally {
     saveBtn.disabled = false;
-    startBtn.disabled = false;
     textarea.disabled = false;
     addingQuestions = false;
+    syncSelection();
   }
 }
 saveNewQuestionsBtn.addEventListener("click", addQuestions);
@@ -149,31 +209,32 @@ async function loadBank() {
   const bank = await api(`/api/listings/banks/${bankId}`);
   questions = bank.questions;
   if (bank.listing_id !== listingId) throw new Error("This question bank belongs to a different job listing.");
-  if (!questions.length) throw new Error("This question bank is empty.");
   if (retakeId) {
     // Keep the original attempt's order when repeating its questions.
     const byId = new Map(questions.map((q) => [q.id, q]));
-    if (previousIds.some((id) => !byId.has(id))) throw new Error("Some previous questions are missing from the saved bank.");
-    questions = [...previousIds.map((id) => byId.get(id)), ...questions.filter((q) => !previousIds.includes(q.id))];
+    questions = [...previousIds.map((id) => byId.get(id)).filter(Boolean), ...questions.filter((q) => !previousIds.includes(q.id))];
     const description = document.getElementById("retakeDescription");
-    description.textContent = `Your previous questions are selected. Keep them or choose others from all ${questions.length} saved questions, including your own. This creates a new attempt and keeps your previous results.`;
+    description.textContent = `Available previous questions are selected. Choose from ${questions.length} saved questions. Deleted questions stay in previous results but are excluded from future attempts.`;
     description.hidden = false;
   }
   setSession("questionBank", bank);
   renderPickList();
   questionCountEl.max = Math.min(20, questions.length);
   syncSelection();
-  startBtn.disabled = false;
   saveNewQuestionsBtn.disabled = false;
 }
 
 startBtn.addEventListener("click", async () => {
-  if (addingQuestions || creatingInterview) return;
+  if (addingQuestions || creatingInterview || deletingQuestion) return;
   if (newCustomQuestions.value.trim() && !await addQuestions()) {
     statusEl.textContent = "Your questions could not be added. Check the message beside Add questions before starting.";
     return;
   }
   const selectedIds = [...pickQuestionsList.querySelectorAll("input:checked")].map((el) => el.dataset.id);
+  if (!questions.length) {
+    statusEl.textContent = "Add at least one question before starting.";
+    return;
+  }
   const settings = {
     question_count: Number(questionCountEl.value),
     selection_mode: selectionModeEl.value,

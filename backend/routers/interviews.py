@@ -99,7 +99,7 @@ def list_interviews(saved: bool = False) -> list[dict[str, Any]]:
         analysis_path = settings.interviews_dir / item["id"] / "analysis.json"
         if item["status"] == "complete" and analysis_path.exists():
             analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
-            aggregate_score = analysis.get("aggregate", {}).get("overall")
+            aggregate_score = analysis.get("aggregate", {}).get("answer_quality")
         summaries.append(
             {
                 "id": item["id"],

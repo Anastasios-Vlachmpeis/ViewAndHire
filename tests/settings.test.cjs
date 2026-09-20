@@ -8,6 +8,7 @@ async function setup() {
   const elements = new Map();
   const requests = [];
   const additions = [];
+  const deleted = new Set();
   const questions = [
     { id: "q1", question: "Other generated question", type: "technical", likelihood: 4 },
     { id: "custom1", question: "My <question>", source: "custom", type: "custom", likelihood: 3 },
@@ -37,14 +38,19 @@ async function setup() {
       listing_id: "listing", question_bank_id: "bank", selected_questions: [questions[2], questions[1]],
       settings: { prep_seconds: 15, answer_seconds: 90, record_mode: "mic" },
     };
-    if (url === "/api/listings/banks/bank") return { id: "bank", listing_id: "listing", questions };
+    if (url === "/api/listings/banks/bank") return { id: "bank", listing_id: "listing", questions: questions.filter((q) => !deleted.has(q.id)) };
+    if (url.startsWith("/api/listings/banks/bank/questions/")) {
+      const id = url.split("/")[6];
+      if (options.method === "DELETE") deleted.add(id); else deleted.delete(id);
+      return { bank: { id: "bank", listing_id: "listing", questions: questions.filter((q) => !deleted.has(q.id)) } };
+    }
     if (url === "/api/listings/banks/bank/custom-questions") {
       const texts = JSON.parse(options.body).questions;
       additions.push(texts);
       const added = texts.map((question) => ({ id: `custom${questions.length + 1}`, question, source: "custom", type: "custom", likelihood: 3 }));
       added.forEach((q, i) => { q.id += `_${i}`; });
       questions.push(...added);
-      return { bank: { id: "bank", listing_id: "listing", questions }, added };
+      return { bank: { id: "bank", listing_id: "listing", questions: questions.filter((q) => !deleted.has(q.id)) }, added };
     }
     if (url === "/api/interviews") { requests.push(JSON.parse(options.body)); return { id: "new-attempt" }; }
     throw new Error(`Unexpected request ${url}`);
@@ -159,5 +165,53 @@ test("random mode keeps its count and explains that added questions are optional
   await s.elements.get("saveNewQuestionsBtn").handlers.click();
   assert.equal(s.elements.get("questionCount").value, 1);
   assert.match(s.elements.get("addQuestionsStatus").textContent, /Random mode may choose/);
-  assert.equal(s.elements.get("pickQuestionsWrap").hidden, true);
+  assert.equal(s.elements.get("pickQuestionsWrap").hidden, false);
+  assert.ok(s.elements.get("pickQuestionsList").inputs.every((input) => input.disabled));
+});
+
+async function deleteQuestion(s, id) {
+  await s.elements.get("pickQuestionsList").handlers.click({ target: { closest: () => ({ dataset: { deleteId: id } }) } });
+}
+
+test("generated and custom questions can be deleted, undone and excluded from retakes", async () => {
+  const s = await setup();
+  const picker = s.elements.get("pickQuestionsList");
+  assert.match(picker.markup, /Delete question: My &lt;question&gt;/);
+  await deleteQuestion(s, "q2");
+  assert.deepEqual(picker.querySelectorAll("input:checked").map((q) => q.dataset.id), ["custom1"]);
+  assert.equal(s.elements.get("questionCount").value, 1);
+  await s.elements.get("undoDeleteBtn").handlers.click();
+  assert.deepEqual(picker.querySelectorAll("input:checked").map((q) => q.dataset.id), ["q2", "custom1"]);
+  await deleteQuestion(s, "custom1");
+  await s.context.loadBank();
+  assert.equal(s.elements.get("startBtn").disabled, false);
+  assert.deepEqual(picker.inputs.map((q) => q.dataset.id), ["q2", "q1"]);
+  await s.elements.get("startBtn").handlers.click();
+  assert.deepEqual(s.requests[0].settings.selected_question_ids, ["q2"]);
+});
+
+test("an empty bank remains editable after reload and can be restored or refilled", async () => {
+  const s = await setup();
+  for (const id of ["q1", "q2", "custom1"]) await deleteQuestion(s, id);
+  await s.context.loadBank();
+  assert.equal(s.elements.get("startBtn").disabled, true);
+  assert.equal(s.elements.get("saveNewQuestionsBtn").disabled, false);
+  assert.match(s.elements.get("pickQuestionsList").markup, /No questions left/);
+  await s.elements.get("undoDeleteBtn").handlers.click();
+  assert.equal(s.elements.get("startBtn").disabled, false);
+  await deleteQuestion(s, "custom1");
+  s.elements.get("newCustomQuestions").value = "Replacement question?";
+  await s.elements.get("saveNewQuestionsBtn").handlers.click();
+  assert.equal(s.elements.get("startBtn").disabled, false);
+  assert.equal(s.elements.get("questionCount").value, 1);
+});
+
+test("failed deletion keeps the question and selection available", async () => {
+  const s = await setup();
+  s.context.api = async () => { throw new Error("Deletion failed"); };
+  await deleteQuestion(s, "q2");
+  assert.equal(s.elements.get("pickQuestionsList").inputs.length, 3);
+  assert.equal(s.elements.get("questionCount").value, 2);
+  assert.equal(s.elements.get("startBtn").disabled, false);
+  assert.match(s.elements.get("deleteQuestionStatus").textContent, /Deletion failed/);
 });

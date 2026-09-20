@@ -162,6 +162,39 @@ class CustomQuestionTests(unittest.TestCase):
         self.assertEqual(retake.json()["selected_questions"], [new_question])
         self.assertEqual(db.get_interview(original["id"])["selected_questions"], self.generated)
 
+    def test_delete_both_question_types_preserves_history_and_supports_undo(self):
+        listing = db.create_listing("A software engineering job listing")
+        custom = {**self.generated[0], "id": "custom1", "source": "custom", "question": "My own question?"}
+        bank = db.save_question_bank(listing["id"], self.generated + [custom])
+        original = db.create_interview(listing["id"], bank["id"], {}, bank["questions"])
+        for question in bank["questions"]:
+            url = f"/api/listings/banks/{bank['id']}/questions/{question['id']}"
+            response = self.client.delete(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn(question["id"], [q["id"] for q in db.get_question_bank(bank["id"])["questions"]])
+            self.assertEqual(self.client.delete(url).status_code, 200)
+        self.assertEqual(db.get_question_bank(bank["id"])["questions"], [])
+        self.assertEqual(db.get_interview(original["id"])["selected_questions"], bank["questions"])
+        new = self.client.post(f"/api/listings/banks/{bank['id']}/custom-questions", json={"questions": ["A new question?"]}).json()["added"][0]
+        self.assertNotEqual(new["id"], "custom1")
+        restored = self.client.post(f"/api/listings/banks/{bank['id']}/questions/custom1/restore")
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual([q["id"] for q in restored.json()["bank"]["questions"]], ["custom1", new["id"]])
+        self.assertNotIn("deleted", restored.json()["bank"]["questions"][0])
+
+    def test_deleted_questions_cannot_be_selected_and_missing_deletes_are_scoped(self):
+        listing = db.create_listing("A software engineering job listing")
+        bank = db.save_question_bank(listing["id"], self.generated)
+        other = db.save_question_bank(listing["id"], self.generated)
+        self.client.delete(f"/api/listings/banks/{bank['id']}/questions/q1")
+        self.assertEqual(db.get_question_bank(other["id"])["questions"], self.generated)
+        response = self.client.post("/api/interviews", json={"listing_id": listing["id"], "question_bank_id": bank["id"],
+            "settings": {"question_count": 1, "selection_mode": "predetermined", "selected_question_ids": ["q1"]}})
+        self.assertEqual(response.status_code, 400)
+        for url in [f"/api/listings/banks/{bank['id']}/questions/missing", "/api/listings/banks/missing/questions/q1"]:
+            self.assertEqual(self.client.delete(url).status_code, 404)
+            self.assertEqual(self.client.post(url + "/restore").status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

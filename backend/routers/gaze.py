@@ -16,14 +16,14 @@ router = APIRouter(prefix="/api/gaze", tags=["gaze"])
 logger = logging.getLogger(__name__)
 _frame_lock = Lock()
 MAX_BYTES = 512 * 1024
-_expression_estimator = None
+_movement_estimator = None
 
 
-def live_expression(frame):
-    global _expression_estimator
-    if _expression_estimator is None:
-        _expression_estimator = face.LiveExpressionEstimator()
-    return _expression_estimator.analyze(frame)
+def live_movement(frame):
+    global _movement_estimator
+    if _movement_estimator is None:
+        _movement_estimator = face.LiveMovementEstimator()
+    return _movement_estimator.analyze(frame)
 
 
 def analyze_jpeg(content):
@@ -40,13 +40,13 @@ def analyze_jpeg(content):
     try:
         start = time.perf_counter()
         result = intel_gaze.get_estimator().analyze(frame, blocking=False)
-        result.update(expression=None, expression_confidence=0.0)
+        result.update(facial_movement=face.movement_summary(None))
         if result.get("face_detected"):
             try:
-                result.update(live_expression(frame))
+                result.update(live_movement(frame))
             except Exception:
-                # An expression failure must not suppress otherwise usable gaze data.
-                logger.exception("Live expression inference failed")
+                # A movement failure must not suppress otherwise usable gaze data.
+                logger.exception("Live movement inference failed")
         result["processing_ms"] = round((time.perf_counter() - start) * 1000, 1)
         return result
     except intel_gaze.GazeUnavailable as exc:
