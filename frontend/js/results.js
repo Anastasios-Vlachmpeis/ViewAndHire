@@ -12,6 +12,16 @@ const overlayLabels = document.getElementById("overlayLabels");
 
 let analysis = null;
 let faceFrames = [];
+let headSensitivity = "balanced";
+let headMovementByFrame = new Map();
+function rebuildHeadMovement() {
+  const results = HeadMovement.analyzeFrames(faceFrames, headSensitivity);
+  headMovementByFrame = new Map(faceFrames.map((frame, index) => [frame, results[index]]));
+}
+HeadMovement.bind(document.getElementById("headMovementSensitivity"), document.getElementById("headMovementHelp"), (value) => {
+  headSensitivity = value;
+  rebuildHeadMovement();
+});
 
 function renderAggregate(agg) {
   const cards = [
@@ -169,7 +179,7 @@ function setupOverlay() {
       const headFacing = frame.head_pose?.facing_camera;
       faceOverlay.style.setProperty("--tracking-color", eyeState === "toward_lens" ? "#22c55e" : eyeState === "away" ? "#f59e0b" : "#94a3b8");
       const movement = { active: "Active", low: "Low", uncertain: "Uncertain" }[frame.facial_movement?.state] || "Uncertain";
-      const labels = `Facial movement: ${movement}<br>Head facing camera: ${headFacing == null ? "Uncertain" : headFacing ? "Yes" : "No"}<br>Eye contact (estimate): ${eyeLabels[eyeState] || "Uncertain"}`;
+      const labels = `Head movement: ${HeadMovement.label(headMovementByFrame.get(frame))}<br>Facial movement: ${movement}<br>Head facing camera: ${headFacing == null ? "Uncertain" : headFacing ? "Yes" : "No"}<br>Eye contact (estimate): ${eyeLabels[eyeState] || "Uncertain"}`;
       if (overlayLabels.innerHTML !== labels) overlayLabels.innerHTML = labels;
       // Attach above the face border, or inside its top edge near the video boundary.
       faceOverlay.dataset.labelInside = "false";
@@ -235,6 +245,7 @@ async function init() {
   ).join(" ");
   warnings.hidden = !warnings.textContent;
   faceFrames = analysis.face_frames || [];
+  rebuildHeadMovement();
   renderAggregate(analysis.aggregate);
   renderWeakPoints(analysis.weak_points || []);
   overview.textContent = analysis.overview || "";

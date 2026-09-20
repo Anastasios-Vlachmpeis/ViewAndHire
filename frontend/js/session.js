@@ -16,6 +16,8 @@ const progressMessage = document.getElementById("progressMessage");
 const retryBtn = document.getElementById("retryBtn");
 const liveGaze = new LiveGazeOverlay(preview, document.getElementById("liveFaceOverlay"),
   document.getElementById("liveGazeLabels"), document.getElementById("liveGazeStatus"));
+HeadMovement.bind(document.getElementById("headMovementSensitivity"), document.getElementById("headMovementHelp"),
+  (value) => liveGaze.setHeadSensitivity(value));
 startBtn.disabled = true;
 
 let interview = null;

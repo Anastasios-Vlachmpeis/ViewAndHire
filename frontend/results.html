@@ -38,6 +38,13 @@
     <div class="card replay-layout">
       <div>
         <h2>Replay with face tracking</h2>
+        <label for="headMovementSensitivity">Head movement sensitivity</label>
+        <select id="headMovementSensitivity">
+          <option value="high">High — detect smaller movements</option>
+          <option value="balanced" selected>Balanced</option>
+          <option value="low">Low — detect larger movements</option>
+        </select>
+        <p id="headMovementHelp" class="muted"></p>
         <div class="video-stage" id="videoStage">
           <video id="replayVideo" controls playsinline></video>
           <div class="face-overlay" id="faceOverlay" hidden>
@@ -57,6 +64,7 @@
     </div>
   </main>
   <script src="/js/api.js"></script>
+  <script src="/js/head-movement.js"></script>
   <script src="/js/results.js"></script>
 </body>
 </html>

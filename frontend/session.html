@@ -23,6 +23,13 @@
         </div>
       </div>
       <p id="liveGazeStatus" class="muted" style="text-align:center;" hidden></p>
+      <label for="headMovementSensitivity">Head movement sensitivity</label>
+      <select id="headMovementSensitivity">
+        <option value="high">High — detect smaller movements</option>
+        <option value="balanced" selected>Balanced</option>
+        <option value="low">Low — detect larger movements</option>
+      </select>
+      <p id="headMovementHelp" class="muted"></p>
       <div class="actions" style="justify-content:center;">
         <button class="btn btn-primary" id="startBtn">Begin interview</button>
         <button class="btn btn-secondary" id="skipBtn" hidden>Skip question</button>
@@ -41,6 +48,7 @@
     </div>
   </main>
   <script src="/js/api.js"></script>
+  <script src="/js/head-movement.js"></script>
   <script src="/js/live-gaze.js"></script>
   <script src="/js/session.js"></script>
 </body>

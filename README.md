@@ -52,6 +52,7 @@ Recordings stay in `data/interviews/`. Job listing text, questions, transcripts,
 ## Notes
 
 - Live preview and replay separate head orientation from estimated eye contact (Toward camera / Away / Uncertain).
+- A separate **Head movement** overlay tracks rotation and position changes. Choose High, Balanced (default), or Low sensitivity in the session or replay; the preference is remembered. Existing recordings with saved head poses work immediately. See [movement thresholds and limitations](docs/head-movement.md).
 - Speech "confidence" uses acoustic proxies (pitch, pauses, fillers).
 - First analysis run downloads Whisper and face model weights.
 - Run one server worker for this local app. Interrupted analyses become retryable after a restart.

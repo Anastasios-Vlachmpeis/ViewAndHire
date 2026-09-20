@@ -40,10 +40,11 @@ async function session(mode = "both") {
     Blob, FormData,
     getQueryParam: () => "test", getSession: () => null, setSession() {},
     window: { location: { href: "" }, addEventListener() {} },
-    LiveGazeOverlay: class { start() {} stop() {} },
+    LiveGazeOverlay: class { start() {} stop() {} setHeadSensitivity() {} },
     api: async (url) => url.endsWith("/progress") ? { stage: "score", percent: 50, message: "Scoring" } : configured,
     fetch: async (url, options) => { requests.push({ url, options }); return { ok: true }; },
   });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../frontend/js/head-movement.js"), "utf8"), context);
   await vm.runInContext(source, context);
   return { context, elements, intervals, timeouts, requests,
     at(ms) { clock = ms; },

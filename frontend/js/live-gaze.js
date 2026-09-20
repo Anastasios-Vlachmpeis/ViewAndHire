@@ -11,6 +11,12 @@ class LiveGazeOverlay {
     this.previous = null;
     this.previousTime = -Infinity;
     this.lastVideoTime = -1;
+    this.headMovement = new HeadMovement.Tracker();
+  }
+
+  setHeadSensitivity(value) {
+    this.headMovement.setSensitivity(value);
+    if (this.running) this.unavailable("Updating head-movement sensitivity…");
   }
 
   start() {
@@ -22,6 +28,7 @@ class LiveGazeOverlay {
   }
 
   stop() {
+    this.headMovement.reset();
     this.running = false;
     this.generation += 1;
     clearTimeout(this.nextTick);
@@ -40,6 +47,7 @@ class LiveGazeOverlay {
   }
 
   unavailable(message = "Uncertain") {
+    this.headMovement.reset();
     this.box.hidden = true;
     this.previous = null;
     this.previousTime = -Infinity;
@@ -70,7 +78,8 @@ class LiveGazeOverlay {
     this.box.style.height = `${h * scaleY}px`;
     this.box.style.setProperty("--tracking-color", state === "toward_lens" ? "#22c55e" : state === "away" ? "#f59e0b" : "#94a3b8");
     const movement = { active: "Active", low: "Low", uncertain: "Uncertain" }[result.facial_movement?.state] || "Uncertain";
-    this.labels.textContent = `Facial movement: ${movement}\nHead facing camera: ${facing == null ? "Uncertain" : facing ? "Yes" : "No"}\nEye contact (estimate): ${labels[state] || "Uncertain"}`;
+    const headMovement = HeadMovement.label(this.headMovement.update(result, capturedAt / 1000));
+    this.labels.textContent = `Head movement: ${headMovement}\nFacial movement: ${movement}\nHead facing camera: ${facing == null ? "Uncertain" : facing ? "Yes" : "No"}\nEye contact (estimate): ${labels[state] || "Uncertain"}`;
     this.box.dataset.labelInside = "false";
     this.box.dataset.labelInside = String(y * scaleY < this.labels.offsetHeight);
     this.status.textContent = "Live eye-contact estimate · Does not affect your score";

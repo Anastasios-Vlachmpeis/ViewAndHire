@@ -13,7 +13,7 @@ test("suggested answers render safely and older results remain readable", () => 
       return elements.get(id);
     } },
   });
-  for (const file of ["api.js", "results.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "../frontend/js", file), "utf8"), context);
+  for (const file of ["api.js", "head-movement.js", "results.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "../frontend/js", file), "utf8"), context);
   const question = { question: "What did you build?", transcript: "A hackathon app", answer_quality: { overall: 60, notes: "Specific example", adequacy: 60, specificity: 60, structure: 60 }, speech_delivery: { score: null }, face_gaze: {} };
   context.renderBreakdown([question]);
   assert.doesNotMatch(elements.get("questionBreakdown").innerHTML, /Suggested answer/);

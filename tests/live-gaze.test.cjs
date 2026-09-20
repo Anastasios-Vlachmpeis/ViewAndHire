@@ -22,6 +22,7 @@ function harness() {
     fetch: async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => known }; },
     video, box, labels, status,
   });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../frontend/js/head-movement.js"), "utf8"), context);
   vm.runInContext(source + "\nvar overlay = new LiveGazeOverlay(video, box, labels, status);", context);
   const overlay = context.overlay;
   return { context, document, requests, timers, overlay, labels, status, box, known, video,
@@ -126,5 +127,25 @@ test("movement labels use blendshapes and never reuse legacy emotion labels", as
   delete s.known.facial_movement;
   s.at(400); await s.fire();
   assert.match(s.labels.textContent, /Facial movement: Uncertain/);
+  s.overlay.stop();
+});
+
+test("live head movement updates independently and resets after a lost frame or sensitivity change", async () => {
+  const s = harness(); s.overlay.start();
+  Object.assign(s.known.head_pose, {yaw:0,pitch:0,roll:0});
+  for (let i=0;i<5;i++) { s.at(i*200); await s.fire(); }
+  assert.match(s.labels.textContent, /Head movement: Steady/);
+  s.known.head_pose.roll = 15;
+  s.at(1000); await s.fire(); s.at(1200); await s.fire();
+  assert.match(s.labels.textContent, /Head movement: Moving/);
+  s.known.face_detected = false;
+  s.at(1400); await s.fire();
+  assert.equal(s.overlay.headMovement.samples.length, 0);
+  s.known.face_detected = true;
+  s.at(1600); await s.fire();
+  assert.match(s.labels.textContent, /Head movement: Uncertain/);
+  s.overlay.setHeadSensitivity("high");
+  assert.equal(s.box.hidden, true);
+  assert.equal(s.overlay.headMovement.sensitivity, "high");
   s.overlay.stop();
 });
