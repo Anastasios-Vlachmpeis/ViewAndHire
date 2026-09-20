@@ -121,6 +121,25 @@ def get_question_bank(bank_id: str) -> dict[str, Any] | None:
     return data
 
 
+def update_question_bank(bank_id: str, questions: list[dict[str, Any]]) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE question_banks SET questions_json = ? WHERE id = ?",
+            (json.dumps(questions), bank_id),
+        )
+        if cursor.rowcount == 0:
+            return None
+    return get_question_bank(bank_id)
+
+
+def update_listing_custom_questions(listing_id: str, custom_questions: list[str]) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE listings SET custom_questions_json = ? WHERE id = ?",
+            (json.dumps(custom_questions), listing_id),
+        )
+
+
 def create_interview(
     listing_id: str,
     question_bank_id: str,

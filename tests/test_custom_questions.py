@@ -128,6 +128,40 @@ class CustomQuestionTests(unittest.TestCase):
         payload["listing_id"] = "old"
         self.assertEqual(self.client.post("/api/interviews", json=payload).status_code, 400)
 
+    def test_retake_adds_user_questions_without_generation(self):
+        listing = db.create_listing("A software engineering job listing")
+        bank = db.save_question_bank(listing["id"], self.generated)
+        with patch.object(listings.llm, "generate_questions") as generate:
+            added = self.client.post(f"/api/listings/banks/{bank['id']}/custom-questions",
+                                     json={"questions": ["  My follow-up?  ", "My follow-up?", "Another of mine?"]})
+            generate.assert_not_called()
+        self.assertEqual(added.status_code, 200)
+        body = added.json()
+        self.assertEqual([q["question"] for q in body["added"]], ["My follow-up?", "Another of mine?"])
+        self.assertTrue(all(q["source"] == "custom" for q in body["added"]))
+        refreshed = self.client.get(f"/api/listings/banks/{bank['id']}").json()
+        self.assertEqual(refreshed["id"], bank["id"])
+        self.assertEqual([q["question"] for q in refreshed["questions"]],
+                         ["Why this role?", "My follow-up?", "Another of mine?"])
+        self.assertEqual(self.client.get(f"/api/listings/{listing['id']}").json()["custom_questions"],
+                         ["My follow-up?", "Another of mine?"])
+        duplicate = self.client.post(f"/api/listings/banks/{bank['id']}/custom-questions", json={"questions": ["my follow-up?"]})
+        self.assertEqual(duplicate.status_code, 400)
+
+    def test_new_custom_question_can_start_retake_without_changing_original_attempt(self):
+        listing = db.create_listing("A software engineering job listing")
+        bank = db.save_question_bank(listing["id"], self.generated)
+        settings = {"question_count": 1, "selection_mode": "predetermined", "prep_seconds": 15,
+                    "answer_seconds": 90, "record_mode": "mic", "selected_question_ids": ["q1"]}
+        original = db.create_interview(listing["id"], bank["id"], settings, self.generated)
+        response = self.client.post(f"/api/listings/banks/{bank['id']}/custom-questions", json={"questions": ["What did I build at the hackathon?"]})
+        new_question = response.json()["added"][0]
+        retake = self.client.post("/api/interviews", json={"listing_id": listing["id"], "question_bank_id": bank["id"],
+            "settings": {**settings, "selected_question_ids": [new_question["id"]]}})
+        self.assertEqual(retake.status_code, 200)
+        self.assertEqual(retake.json()["selected_questions"], [new_question])
+        self.assertEqual(db.get_interview(original["id"])["selected_questions"], self.generated)
+
 
 if __name__ == "__main__":
     unittest.main()

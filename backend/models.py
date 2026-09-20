@@ -12,6 +12,12 @@ class ListingCreate(BaseModel):
     )
 
 
+class CustomQuestionsAdd(BaseModel):
+    questions: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]] = Field(
+        min_length=1, max_length=20
+    )
+
+
 class QuestionItem(BaseModel):
     id: str
     question: str

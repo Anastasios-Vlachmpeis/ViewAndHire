@@ -11,15 +11,22 @@ const pickQuestionsWrap = document.getElementById("pickQuestionsWrap");
 const pickQuestionsList = document.getElementById("pickQuestionsList");
 const startBtn = document.getElementById("startBtn");
 const statusEl = document.getElementById("status");
+const saveNewQuestionsBtn = document.getElementById("saveNewQuestionsBtn");
+const newCustomQuestions = document.getElementById("newCustomQuestions");
+const addQuestionsStatus = document.getElementById("addQuestionsStatus");
 
 let questions = [];
 let previousIds = [];
+let addingQuestions = false;
+let creatingInterview = false;
 startBtn.disabled = true;
+saveNewQuestionsBtn.disabled = true;
 
 function syncSelection() {
   const predetermined = selectionModeEl.value === "predetermined";
   pickQuestionsWrap.hidden = !predetermined;
   questionCountEl.disabled = predetermined;
+  questionCountEl.max = Math.min(20, Math.max(1, questions.length));
   if (predetermined) {
     questionCountEl.value = pickQuestionsList.querySelectorAll("input:checked").length;
   } else {
@@ -27,12 +34,12 @@ function syncSelection() {
   }
 }
 
-function renderPickList() {
+function renderPickList(selectedIds = null) {
   pickQuestionsList.innerHTML = questions
     .map(
       (q, idx) => `
       <label class="question-item">
-        <input type="checkbox" data-id="${escapeHtml(q.id)}" ${(retakeId ? previousIds.includes(q.id) : idx < 5) ? "checked" : ""}>
+        <input type="checkbox" data-id="${escapeHtml(q.id)}" ${(selectedIds ? selectedIds.has(q.id) : retakeId ? previousIds.includes(q.id) : idx < 5) ? "checked" : ""}>
         <span class="badge">${q.source === "custom" ? "Your question" : escapeHtml(q.type)}</span>
         ${q.source === "custom" ? "" : `<span class="badge">${escapeHtml(q.likelihood)}/5</span>`}
         ${previousIds.includes(q.id) ? '<span class="badge">Used last time</span>' : ""}
@@ -54,6 +61,70 @@ document.getElementById("clearQuestionsBtn").addEventListener("click", () => {
   pickQuestionsList.querySelectorAll("input").forEach((input) => { input.checked = false; });
   syncSelection();
 });
+async function addQuestions() {
+  if (addingQuestions || creatingInterview) return false;
+  const textarea = newCustomQuestions;
+  const texts = textarea.value.split(/\r?\n/).map((question) => question.trim()).filter(Boolean);
+  if (!texts.length) {
+    addQuestionsStatus.textContent = "Type at least one question, one per line.";
+    return false;
+  }
+  if (texts.length > 20 || texts.some((question) => question.length > 2000)) {
+    addQuestionsStatus.textContent = "Add up to 20 questions, each 2,000 characters or fewer.";
+    return false;
+  }
+  const saveBtn = saveNewQuestionsBtn;
+  if (!bankId) {
+    addQuestionsStatus.textContent = "Load an interview before adding questions.";
+    return false;
+  }
+  saveBtn.disabled = true;
+  startBtn.disabled = true;
+  textarea.disabled = true;
+  addingQuestions = true;
+  addQuestionsStatus.textContent = "Adding your questions...";
+  try {
+    const result = await api(`/api/listings/banks/${encodeURIComponent(bankId)}/custom-questions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questions: texts }),
+    });
+    const addedIds = result.added.map((q) => q.id);
+    // Read current choices after the request, including changes made while saving.
+    const selectedIds = new Set([...pickQuestionsList.querySelectorAll("input:checked")].map((input) => input.dataset.id));
+    if (selectionModeEl.value === "predetermined") {
+      addedIds.forEach((id) => { if (selectedIds.size < 20) selectedIds.add(id); });
+    }
+    questions = result.bank.questions;
+    if (previousIds.length) {
+      const byId = new Map(questions.map((q) => [q.id, q]));
+      questions = [...previousIds.map((id) => byId.get(id)).filter(Boolean), ...questions.filter((q) => !previousIds.includes(q.id))];
+    }
+    setSession("questionBank", result.bank);
+    renderPickList(selectedIds);
+    questionCountEl.max = Math.min(20, questions.length);
+    textarea.value = "";
+    const description = document.getElementById("retakeDescription");
+    if (description && !description.hidden) {
+      description.textContent = `Choose from all ${questions.length} saved questions, including your own. Use previous questions to restore the original selection. This creates a new attempt and keeps your previous results.`;
+    }
+    syncSelection();
+    const selectedAdded = addedIds.filter((id) => selectedIds.has(id)).length;
+    addQuestionsStatus.textContent = selectionModeEl.value === "random"
+      ? `Added ${addedIds.length} to the question bank. Random mode may choose them; switch to predetermined mode to include specific questions.`
+      : `Added ${addedIds.length} to the question bank; ${selectedAdded} selected for this attempt.` + (selectedAdded < addedIds.length ? " You can select up to 20 questions below." : "");
+    return true;
+  } catch (err) {
+    addQuestionsStatus.textContent = err.message;
+    return false;
+  } finally {
+    saveBtn.disabled = false;
+    startBtn.disabled = false;
+    textarea.disabled = false;
+    addingQuestions = false;
+  }
+}
+saveNewQuestionsBtn.addEventListener("click", addQuestions);
 
 async function loadBank() {
   if (retakeId) {
@@ -62,6 +133,7 @@ async function loadBank() {
     bankId = previous.question_bank_id;
     previousIds = previous.selected_questions.map((q) => q.id);
     selectionModeEl.value = "predetermined";
+    questionCountEl.value = previous.settings.question_count || previousIds.length;
     prepSecondsEl.value = previous.settings.prep_seconds;
     answerSecondsEl.value = previous.settings.answer_seconds;
     recordModeEl.value = previous.settings.record_mode;
@@ -92,9 +164,15 @@ async function loadBank() {
   questionCountEl.max = Math.min(20, questions.length);
   syncSelection();
   startBtn.disabled = false;
+  saveNewQuestionsBtn.disabled = false;
 }
 
 startBtn.addEventListener("click", async () => {
+  if (addingQuestions || creatingInterview) return;
+  if (newCustomQuestions.value.trim() && !await addQuestions()) {
+    statusEl.textContent = "Your questions could not be added. Check the message beside Add questions before starting.";
+    return;
+  }
   const selectedIds = [...pickQuestionsList.querySelectorAll("input:checked")].map((el) => el.dataset.id);
   const settings = {
     question_count: Number(questionCountEl.value),
@@ -114,6 +192,8 @@ startBtn.addEventListener("click", async () => {
   }
   if (settings.selection_mode === "predetermined") settings.question_count = selectedIds.length;
   startBtn.disabled = true;
+  saveNewQuestionsBtn.disabled = true;
+  creatingInterview = true;
   statusEl.textContent = "Creating interview session...";
   try {
     const interview = await api("/api/interviews", {
@@ -130,6 +210,8 @@ startBtn.addEventListener("click", async () => {
   } catch (err) {
     statusEl.textContent = err.message;
     startBtn.disabled = false;
+    saveNewQuestionsBtn.disabled = false;
+    creatingInterview = false;
   }
 });
 

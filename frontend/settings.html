@@ -9,10 +9,6 @@
 <body>
   <header class="app-header">
     <a href="/">ViewAndHired</a>
-    <nav>
-      <a href="/listing">New interview</a>
-      <a href="/history">Saved interviews</a>
-    </nav>
   </header>
   <main class="container">
     <div class="card">
@@ -47,17 +43,27 @@
           </select>
         </div>
       </div>
+      <div id="addQuestionsWrap" style="margin-top: 16px;">
+        <h3>Add your own questions</h3>
+        <label for="newCustomQuestions">Your questions</label>
+        <textarea id="newCustomQuestions" rows="4" placeholder="One question per line"></textarea>
+        <p class="muted">Added to this interview's question bank only. Nothing is generated.</p>
+        <div class="actions">
+          <button type="button" class="btn btn-primary" id="saveNewQuestionsBtn">Add questions</button>
+        </div>
+        <p id="addQuestionsStatus" class="muted" role="status" aria-live="polite"></p>
+      </div>
       <div id="pickQuestionsWrap" hidden style="margin-top: 16px;">
         <h3>Select questions (predetermined mode)</h3>
         <p class="muted">Choose up to 20 questions. The interview will include every checked question.</p>
         <div class="actions" id="retakeActions" hidden>
-          <button class="btn btn-secondary" id="previousQuestionsBtn">Use previous questions</button>
-          <button class="btn btn-secondary" id="clearQuestionsBtn">Clear selection</button>
+          <button type="button" class="btn btn-secondary" id="previousQuestionsBtn">Use previous questions</button>
+          <button type="button" class="btn btn-secondary" id="clearQuestionsBtn">Clear selection</button>
         </div>
         <div id="pickQuestionsList"></div>
       </div>
       <div class="actions">
-        <button class="btn btn-primary" id="startBtn">Start interview</button>
+        <button type="button" class="btn btn-primary" id="startBtn">Start interview</button>
         <a class="btn btn-secondary" href="/listing">Back</a>
       </div>
       <p id="status" class="muted"></p>
