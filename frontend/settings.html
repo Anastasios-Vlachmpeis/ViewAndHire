@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interview Settings - ViewAndHire</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="app-header">
+    <a href="/">ViewAndHire</a>
+    <nav>
+      <a href="/listing">New interview</a>
+      <a href="/history">Saved interviews</a>
+    </nav>
+  </header>
+  <main class="container">
+    <div class="card">
+      <h1>Interview settings</h1>
+      <div class="grid-2">
+        <div>
+          <label for="questionCount">Number of questions</label>
+          <input type="number" id="questionCount" min="1" max="20" value="5">
+        </div>
+        <div>
+          <label for="selectionMode">Question selection</label>
+          <select id="selectionMode">
+            <option value="random">Random (likelihood-weighted)</option>
+            <option value="predetermined">Predetermined (pick below)</option>
+          </select>
+        </div>
+        <div>
+          <label for="prepSeconds">Prep time (seconds)</label>
+          <input type="number" id="prepSeconds" min="0" max="300" value="30">
+        </div>
+        <div>
+          <label for="answerSeconds">Answer time (seconds)</label>
+          <input type="number" id="answerSeconds" min="15" max="600" value="120">
+        </div>
+        <div>
+          <label for="recordMode">Recording mode</label>
+          <select id="recordMode">
+            <option value="both">Camera + microphone</option>
+            <option value="mic">Microphone only</option>
+            <option value="camera">Camera only</option>
+          </select>
+        </div>
+      </div>
+      <div id="pickQuestionsWrap" hidden style="margin-top: 16px;">
+        <h3>Select questions (predetermined mode)</h3>
+        <div id="pickQuestionsList"></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" id="startBtn">Start interview</button>
+        <a class="btn btn-secondary" href="/listing">Back</a>
+      </div>
+      <p id="status" class="muted"></p>
+    </div>
+  </main>
+  <script src="/js/api.js"></script>
+  <script src="/js/settings.js"></script>
+</body>
+</html>

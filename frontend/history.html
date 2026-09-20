@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Saved Interviews - ViewAndHire</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="app-header">
+    <a href="/">ViewAndHire</a>
+    <nav>
+      <a href="/listing">New interview</a>
+      <a href="/history">Saved interviews</a>
+    </nav>
+  </header>
+  <main class="container">
+    <div class="card">
+      <h1>Saved interviews</h1>
+      <p class="muted">Reopen a saved session to review scores and replay.</p>
+      <div id="historyList"></div>
+      <p id="status" class="muted"></p>
+    </div>
+  </main>
+  <script src="/js/api.js"></script>
+  <script src="/js/history.js"></script>
+</body>
+</html>

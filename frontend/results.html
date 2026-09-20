@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Results - ViewAndHire</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="app-header">
+    <a href="/">ViewAndHire</a>
+    <nav>
+      <a href="/listing">New interview</a>
+      <a href="/history">Saved interviews</a>
+    </nav>
+  </header>
+  <main class="container-wide">
+    <div class="card">
+      <h1>Interview results</h1>
+      <div class="score-grid" id="aggregateScores"></div>
+      <div class="actions">
+        <button class="btn btn-primary" id="saveBtn">Save interview</button>
+        <a class="btn btn-secondary" href="/listing">New interview</a>
+      </div>
+      <p id="saveStatus" class="muted"></p>
+    </div>
+
+    <div class="card">
+      <h2>Practice targets</h2>
+      <div id="weakPoints"></div>
+    </div>
+
+    <div class="card">
+      <h2>Feedback overview</h2>
+      <div id="overview" class="muted"></div>
+    </div>
+
+    <div class="card replay-layout">
+      <div>
+        <h2>Replay with face tracking</h2>
+        <div class="video-stage" id="videoStage">
+          <video id="replayVideo" controls playsinline></video>
+          <canvas id="overlayCanvas"></canvas>
+          <div class="overlay-labels" id="overlayLabels">Waiting for playback...</div>
+        </div>
+      </div>
+      <div>
+        <h3>Questions</h3>
+        <div id="timeline"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Per-question breakdown</h2>
+      <div id="questionBreakdown"></div>
+    </div>
+  </main>
+  <script src="/js/api.js"></script>
+  <script src="/js/results.js"></script>
+</body>
+</html>

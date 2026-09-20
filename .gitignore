@@ -1,0 +1,9 @@
+.venv/
+.env
+data/
+__pycache__/
+*.pyc
+backend/weights/
+*.webm
+*.wav
+Scoring.txt/

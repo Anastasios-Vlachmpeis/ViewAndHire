@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Listing - ViewAndHire</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="app-header">
+    <a href="/">ViewAndHire</a>
+    <nav>
+      <a href="/listing">New interview</a>
+      <a href="/history">Saved interviews</a>
+    </nav>
+  </header>
+  <main class="container">
+    <div class="card">
+      <h1>Job listing</h1>
+      <p class="muted">Paste the full job post. The LLM will generate likely pre-screening questions.</p>
+      <div class="grid-2">
+        <div>
+          <label for="company">Company (optional)</label>
+          <input type="text" id="company" placeholder="Acme Corp">
+        </div>
+        <div>
+          <label for="role">Role title (optional)</label>
+          <input type="text" id="role" placeholder="Software Engineer">
+        </div>
+      </div>
+      <div style="margin-top: 12px;">
+        <label for="jobText">Job listing</label>
+        <textarea id="jobText" placeholder="Paste the job description here..."></textarea>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" id="generateBtn">Generate questions</button>
+      </div>
+      <p id="status" class="muted"></p>
+    </div>
+    <div class="card" id="questionsCard" hidden>
+      <h2>Question bank</h2>
+      <p class="muted">Review generated questions, then continue to interview settings.</p>
+      <div id="questionsList"></div>
+      <div class="actions">
+        <a class="btn btn-primary" id="continueBtn" href="#">Continue to settings</a>
+      </div>
+    </div>
+  </main>
+  <script src="/js/api.js"></script>
+  <script src="/js/listing.js"></script>
+</body>
+</html>
