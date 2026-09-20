@@ -265,6 +265,7 @@ def run_analysis(
                     "ambiguity_penalty": answer_quality.get("ambiguity_penalty", 0),
                     "overall": answer_quality.get("overall", 0),
                     "notes": answer_quality.get("notes", ""),
+                    "suggested_answer": answer_quality.get("suggested_answer"),
                 },
                 "speech_delivery": speech,
                 "face_gaze": face_summary,

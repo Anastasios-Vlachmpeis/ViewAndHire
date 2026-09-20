@@ -51,6 +51,7 @@ class AnswerScore(BaseModel):
     ambiguity_penalty: float = Field(ge=0, le=100, allow_inf_nan=False)
     overall: float = Field(ge=0, le=100, allow_inf_nan=False)
     notes: str
+    suggested_answer: str | None = None
 
 
 class UploadPayload(BaseModel):

@@ -136,7 +136,7 @@ class ConciseFeedbackTests(unittest.TestCase):
         self.assertEqual(complete.call_count, 2)
 
     def test_overlong_answer_notes_are_repaired(self):
-        good = {"adequacy": 70, "specificity": 70, "structure": 70, "ambiguity_penalty": 0, "overall": 70, "notes": "Clear example. Name the result next time."}
+        good = {"adequacy": 70, "specificity": 70, "structure": 70, "ambiguity_penalty": 0, "overall": 70, "notes": "Clear example. Name the result next time.", "suggested_answer": "My example. [Add the actual outcome.]"}
         bad = {**good, "notes": "word " * 46}
         with patch.object(llm, "_complete", side_effect=[json.dumps(bad), json.dumps(good)]):
             self.assertEqual(llm.score_answer("question", "", "answer"), good)

@@ -69,7 +69,8 @@ class LiveGazeOverlay {
     this.box.style.width = `${w * scaleX}px`;
     this.box.style.height = `${h * scaleY}px`;
     this.box.style.setProperty("--tracking-color", state === "toward_lens" ? "#22c55e" : state === "away" ? "#f59e0b" : "#94a3b8");
-    this.labels.textContent = `Head facing camera: ${facing == null ? "Uncertain" : facing ? "Yes" : "No"}\nEye contact (estimate): ${labels[state] || "Uncertain"}`;
+    const emotion = result.expression && result.expression_confidence >= .5 ? result.expression : "Uncertain";
+    this.labels.textContent = `Emotion (estimate): ${emotion}\nHead facing camera: ${facing == null ? "Uncertain" : facing ? "Yes" : "No"}\nEye contact (estimate): ${labels[state] || "Uncertain"}`;
     this.box.dataset.labelInside = "false";
     this.box.dataset.labelInside = String(y * scaleY < this.labels.offsetHeight);
     this.status.textContent = "Live eye-contact estimate · Does not affect your score";

@@ -10,12 +10,20 @@ from fastapi import APIRouter, HTTPException, Request
 from PIL import Image, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 
-from backend.services import intel_gaze
+from backend.services import face, intel_gaze
 
 router = APIRouter(prefix="/api/gaze", tags=["gaze"])
 logger = logging.getLogger(__name__)
 _frame_lock = Lock()
 MAX_BYTES = 512 * 1024
+_expression_estimator = None
+
+
+def live_expression(frame):
+    global _expression_estimator
+    if _expression_estimator is None:
+        _expression_estimator = face.LiveExpressionEstimator()
+    return _expression_estimator.analyze(frame)
 
 
 def analyze_jpeg(content):
@@ -32,6 +40,13 @@ def analyze_jpeg(content):
     try:
         start = time.perf_counter()
         result = intel_gaze.get_estimator().analyze(frame, blocking=False)
+        result.update(expression=None, expression_confidence=0.0)
+        if result.get("face_detected"):
+            try:
+                result.update(live_expression(frame))
+            except Exception:
+                # An expression failure must not suppress otherwise usable gaze data.
+                logger.exception("Live expression inference failed")
         result["processing_ms"] = round((time.perf_counter() - start) * 1000, 1)
         return result
     except intel_gaze.GazeUnavailable as exc:

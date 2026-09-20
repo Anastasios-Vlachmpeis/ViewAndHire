@@ -149,7 +149,7 @@ class TranscriptAndScoringTests(unittest.TestCase):
             with patch.object(llm, "_complete", return_value=payload), self.assertRaises(ValueError):
                 llm.score_answer("Q", "", "An answer")
         score = {"adequacy": 70, "specificity": 70, "structure": 70,
-                 "ambiguity_penalty": 0, "overall": 70, "notes": "Useful example"}
+                 "ambiguity_penalty": 0, "overall": 70, "notes": "Useful example", "suggested_answer": "An answer. [Add the actual outcome.]"}
         with patch.object(llm, "_complete", return_value="```json\n" + json.dumps(score) + "\n```"):
             self.assertEqual(llm.score_answer("Q", "", "An answer"), score)
 
@@ -248,7 +248,7 @@ class PipelineAndApiTests(unittest.TestCase):
         t = np.arange(32000) / 16000
         scoring._write_pcm_wav(self.directory / "recording.webm", 0.2 * np.sin(2 * np.pi * 150 * t))
         transcript = {"text": "I built this", "words": [{"word": "I built this", "start": 0.2, "end": 1.5}]}
-        score = {"adequacy": 80, "specificity": 70, "structure": 75, "ambiguity_penalty": 0, "overall": 75, "notes": "Good"}
+        score = {"adequacy": 80, "specificity": 70, "structure": 75, "ambiguity_penalty": 0, "overall": 75, "notes": "Good", "suggested_answer": "I built this. [Add the actual outcome.]"}
         for mode in ["mic", "both", "camera"]:
             with patch.object(asr, "transcribe_audio", return_value=transcript), \
                  patch.object(llm, "_complete", side_effect=[json.dumps(score), json.dumps({"keep": "Specific example", "actions": ["Describe your role.", "Explain the result.", "Practise once aloud."]})]), \
@@ -256,6 +256,8 @@ class PipelineAndApiTests(unittest.TestCase):
                 result = scoring.run_analysis(self.iid, self.directory, QUESTIONS,
                                               [timestamp(0, 2), timestamp(2, 2, 1)], mode, "Role")
             self.assertEqual(result["per_question"][0]["answer_quality"]["overall"], 75)
+            self.assertEqual(result["per_question"][0]["answer_quality"]["suggested_answer"], score["suggested_answer"])
+            self.assertIsNone(result["per_question"][1]["answer_quality"]["suggested_answer"])
             self.assertEqual(result["per_question"][1]["transcript"], "")
             self.assertIsNone(result["per_question"][1]["speech_delivery"]["score"])
             self.assertEqual(video.call_count, int(mode != "mic"))

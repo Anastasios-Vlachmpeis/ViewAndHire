@@ -70,6 +70,26 @@ def _get_fer() -> cv2.dnn.Net:
     return cv2.dnn.readNet(str(path))
 
 
+class LiveExpressionEstimator:
+    """Independent still-image tracking; serialize shared mutable networks."""
+    def __init__(self):
+        self.lock = Lock()
+        self.net = _get_fer()
+        self.landmarker = vision.FaceLandmarker.create_from_options(vision.FaceLandmarkerOptions(
+            base_options=python.BaseOptions(model_asset_path=_landmarker_model_path()),
+            num_faces=1, running_mode=vision.RunningMode.IMAGE,
+        ))
+
+    def analyze(self, frame):
+        with self.lock:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            result = self.landmarker.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
+            if not result.face_landmarks:
+                return {"expression": None, "expression_confidence": 0.0}
+            label, confidence = _predict_expression(frame, result.face_landmarks[0], self.net)
+            return {"expression": label, "expression_confidence": round(confidence, 3)}
+
+
 def _bbox_from_landmarks(landmarks: list, width: int, height: int) -> dict[str, float]:
     xs = [lm.x * width for lm in landmarks]
     ys = [lm.y * height for lm in landmarks]

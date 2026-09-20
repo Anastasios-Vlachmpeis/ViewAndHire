@@ -113,3 +113,17 @@ test("paused, ended and frozen video clear contact without sending duplicate fra
   assert.match(s.labels.textContent, /Toward camera/);
   s.overlay.stop();
 });
+
+test("emotion labels reflect the current expression and abstain on unclear samples", async () => {
+  const s = harness(); s.overlay.start();
+  s.known.expression = "happy"; s.known.expression_confidence = .8;
+  await s.fire();
+  assert.match(s.labels.textContent, /Emotion \(estimate\): happy/);
+  s.known.expression_confidence = .3;
+  s.at(200); await s.fire();
+  assert.match(s.labels.textContent, /Emotion \(estimate\): Uncertain/);
+  s.known.expression = null;
+  s.at(400); await s.fire();
+  assert.match(s.labels.textContent, /Emotion \(estimate\): Uncertain/);
+  s.overlay.stop();
+});

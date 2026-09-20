@@ -90,6 +90,11 @@ function renderBreakdown(perQuestion) {
             <div class="muted">Head facing camera: ${q.face_gaze.head_facing_ratio != null ? `${Math.round(q.face_gaze.head_facing_ratio * 100)}%` : "Uncertain"}</div>
           </div>
         </div>
+        ${q.answer_quality.suggested_answer ? `<div class="suggested-answer">
+          <h4>Suggested answer</h4>
+          <p>${escapeHtml(q.answer_quality.suggested_answer)}</p>
+          <p class="muted">Based on your answer. Fill in any brackets with your own details.</p>
+        </div>` : ""}
         <details class="feedback-details">
           <summary>View transcript</summary>
           <p class="muted">${escapeHtml(q.transcript || "(no speech detected)")}</p>
@@ -137,7 +142,8 @@ function setupOverlay() {
       const eyeLabels = { toward_lens: "Toward camera", away: "Away", uncertain: "Uncertain" };
       const headFacing = frame.head_pose?.facing_camera;
       faceOverlay.style.setProperty("--tracking-color", eyeState === "toward_lens" ? "#22c55e" : eyeState === "away" ? "#f59e0b" : "#94a3b8");
-      const labels = `Expression: ${escapeHtml(frame.expression || "unknown")}<br>Head facing camera: ${headFacing == null ? "Uncertain" : headFacing ? "Yes" : "No"}<br>Eye contact (estimate): ${eyeLabels[eyeState] || "Uncertain"}`;
+      const emotion = frame.expression && frame.expression_confidence >= .5 ? frame.expression : "Uncertain";
+      const labels = `Emotion (estimate): ${escapeHtml(emotion)}<br>Head facing camera: ${headFacing == null ? "Uncertain" : headFacing ? "Yes" : "No"}<br>Eye contact (estimate): ${eyeLabels[eyeState] || "Uncertain"}`;
       if (overlayLabels.innerHTML !== labels) overlayLabels.innerHTML = labels;
       // Attach above the face border, or inside its top edge near the video boundary.
       faceOverlay.dataset.labelInside = "false";
