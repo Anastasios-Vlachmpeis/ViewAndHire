@@ -262,6 +262,15 @@ textarea {
   pointer-events: none;
 }
 
+.feedback-details {
+  margin-top: 16px;
+}
+
+.feedback-details summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+
 .overlay-labels {
   position: absolute;
   left: -3px;

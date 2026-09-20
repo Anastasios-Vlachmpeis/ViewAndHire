@@ -12,6 +12,7 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 from backend.config import settings
+from backend.services import gaze
 
 FER_MODEL_URL = (
     "https://github.com/opencv/opencv_zoo/raw/main/models/"
@@ -42,6 +43,7 @@ def _get_landmarker() -> vision.FaceLandmarker:
         base_options=python.BaseOptions(model_asset_path=_landmarker_model_path()),
         num_faces=1,
         running_mode=vision.RunningMode.VIDEO,
+        output_facial_transformation_matrixes=True,
     )
     return vision.FaceLandmarker.create_from_options(options)
 
@@ -78,31 +80,6 @@ def _bbox_from_landmarks(landmarks: list, width: int, height: int) -> dict[str, 
     return {"x": float(x0), "y": float(y0), "w": float(x1 - x0), "h": float(y1 - y0)}
 
 
-def _looking_at_camera(landmarks: list, width: int, height: int) -> bool:
-    """Camera-facing proxy, measured relative to face size, not image size."""
-    if len(landmarks) < 478:
-        return False
-    points = np.array([(lm.x * width, lm.y * height) for lm in landmarks])
-    eyes = [(points[33] + points[133]) / 2, (points[362] + points[263]) / 2]
-    axis = eyes[1] - eyes[0]
-    eye_spacing = np.linalg.norm(axis)
-    if eye_spacing < 1e-6:
-        return False
-    axis /= eye_spacing
-    vertical = np.array([-axis[1], axis[0]])
-    for center, corners, iris_ids in zip(eyes, [(33, 133), (362, 263)], [range(468, 473), range(473, 478)]):
-        eye_width = np.linalg.norm(points[corners[1]] - points[corners[0]])
-        if eye_width < 1e-6:
-            return False
-        iris = points[list(iris_ids)].mean(axis=0)
-        if abs(np.dot(iris - center, axis)) / eye_width >= 0.22:
-            return False
-    nose_offset = points[1] - (eyes[0] + eyes[1]) / 2
-    yaw_proxy = abs(np.dot(nose_offset, axis)) / eye_spacing
-    pitch_proxy = np.dot(nose_offset, vertical) / eye_spacing
-    return bool(yaw_proxy < 0.35 and 0.15 < pitch_proxy < 0.95)
-
-
 def _predict_expression(frame: np.ndarray, landmarks: list, net: cv2.dnn.Net) -> tuple[str | None, float]:
     height, width = frame.shape[:2]
     points = np.array([(lm.x * width, lm.y * height) for lm in landmarks], dtype=np.float32)
@@ -127,7 +104,7 @@ def _predict_expression(frame: np.ndarray, landmarks: list, net: cv2.dnn.Net) ->
     return EXPRESSION_LABELS[idx], float(probabilities[idx])
 
 
-def analyze_video(video_path: Path, sample_fps: float = 5.0) -> dict[str, Any]:
+def analyze_video(video_path: Path, sample_fps: float = 5.0, calibration: list[dict] | None = None) -> dict[str, Any]:
     if not math.isfinite(sample_fps) or sample_fps <= 0:
         raise ValueError("sample_fps must be positive and finite")
     frames: list[dict[str, Any]] = []
@@ -157,7 +134,9 @@ def analyze_video(video_path: Path, sample_fps: float = 5.0) -> dict[str, Any]:
                 result = landmarker.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp_ms)
                 height, width = frame.shape[:2]
                 entry = {"time": round(time, 3), "face_detected": False, "bbox": None,
-                         "expression": None, "expression_confidence": 0.0, "looking_at_camera": False}
+                         "expression": None, "expression_confidence": 0.0,
+                         "head_pose": gaze.head_orientation(None),
+                         "_eyes": {"values": None, "reason": "face_unavailable"}}
                 if result.face_landmarks:
                     landmarks = result.face_landmarks[0]
                     if net is None:
@@ -165,36 +144,34 @@ def analyze_video(video_path: Path, sample_fps: float = 5.0) -> dict[str, Any]:
                     expression, confidence = _predict_expression(frame, landmarks, net)
                     entry.update(face_detected=True, bbox=_bbox_from_landmarks(landmarks, width, height),
                                  expression=expression, expression_confidence=round(confidence, 3),
-                                 looking_at_camera=_looking_at_camera(landmarks, width, height))
+                                 head_pose=gaze.head_orientation(next(iter(getattr(result, "facial_transformation_matrixes", [])), None)),
+                                 _eyes=gaze.eye_features(landmarks, width, height))
                 frames.append(entry)
     if not frames:
         raise ValueError("Recording contains no decodable video frames")
-    return {"frames": frames, "summary": summarize_frames(frames)}
+    calibration_status = gaze.apply_eye_contact(frames, gaze.validate_calibration(calibration or []))
+    return {"frames": frames, "summary": summarize_frames(frames), "calibration": calibration_status}
 
 
 def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
+    frames = [f for f in frames if not f.get("calibration_frame")]
     detected = [f for f in frames if f["face_detected"]]
-    looking = [f for f in detected if f["looking_at_camera"]]
     face_visible_ratio = len(detected) / len(frames) if frames else 0.0
-    looking_ratio = len(looking) / len(detected) if detected else 0.0
-
-    negative = sum(1 for f in detected if f["expression"] in {"fearful", "sad", "angry", "disgust"})
-    positive = sum(1 for f in detected if f["expression"] in {"happy", "neutral", "surprised"})
-    expression_balance = positive / len(detected) if detected else 0.0
-
-    score = (
-        face_visible_ratio * 30
-        + looking_ratio * 45
-        + expression_balance * 25
-    )
-    negative_ratio = negative / len(detected) if detected else 0.0
-    score = max(0.0, min(100.0, score - negative_ratio * 15))
-
+    head_known = [f["head_pose"]["facing_camera"] for f in detected
+                  if f.get("head_pose", {}).get("facing_camera") is not None]
+    eye_known = [f["eye_contact"]["state"] for f in detected
+                 if f.get("eye_contact", {}).get("state") in {"toward_lens", "away"}]
+    coverage = len(eye_known) / len(frames) if frames else 0.0
+    ratio = eye_known.count("toward_lens") / len(eye_known) if eye_known else None
+    score = ratio * 100 if ratio is not None and coverage >= 0.5 and len(eye_known) >= 10 else None
     return {
-        "score": round(score, 1) if frames else None,
+        "score": round(score, 1) if score is not None else None,
         "face_visible_ratio": round(face_visible_ratio, 3),
-        "looking_ratio": round(looking_ratio, 3),
-        "expression_balance": round(expression_balance, 3),
+        "head_facing_ratio": round(sum(head_known) / len(head_known), 3) if head_known else None,
+        "eye_contact_ratio": round(ratio, 3) if ratio is not None else None,
+        "eye_contact_coverage": round(coverage, 3),
+        "eye_contact_sample_count": len(eye_known),
         "sample_count": len(frames),
-        "notes": "Camera-facing and expression estimates are uncalibrated visual proxies.",
+        "notes": "Estimated lens gaze among clear samples; uncertain frames are excluded. Head orientation is separate."
+                 if score is not None else "Eye-contact score unavailable: needs calibration and enough clear eye samples.",
     }

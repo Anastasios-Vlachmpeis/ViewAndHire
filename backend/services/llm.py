@@ -3,10 +3,41 @@ import re
 from typing import Any
 
 from openai import OpenAI
+from pydantic import BaseModel, Field, field_validator
 
 from backend.config import settings
 from backend.models import AnswerScore, QuestionItem
 from backend.services.json_io import dumps
+
+
+class FeedbackOverview(BaseModel):
+    keep: str = Field(min_length=1)
+    actions: list[str] = Field(min_length=3, max_length=3)
+
+    @field_validator("keep")
+    @classmethod
+    def concise_strength(cls, value):
+        if not value.strip() or len(value.split()) > 25:
+            raise ValueError("Strength must be 1 to 25 words")
+        return " ".join(value.split())
+
+    @field_validator("actions")
+    @classmethod
+    def concise_actions(cls, values):
+        return [cls.concise_strength(value) for value in values]
+
+
+def _validated_feedback(messages, validate):
+    """One repair attempt for malformed or overly verbose feedback."""
+    for attempt in range(2):
+        content = _complete(messages, json_mode=True)
+        try:
+            return validate(_extract_json(content))
+        except (ValueError, TypeError):
+            if attempt:
+                raise ValueError("Feedback did not match the concise format. Please retry analysis.")
+            messages = [*messages, {"role": "assistant", "content": content},
+                        {"role": "user", "content": "Return the required JSON structure and respect every word limit. No extra fields or prose."}]
 
 
 def _client() -> OpenAI:
@@ -102,17 +133,21 @@ Return JSON only:
   "structure": 0-100,
   "ambiguity_penalty": 0-100,
   "overall": 0-100,
-  "notes": "2-3 sentences on strengths and gaps"
+  "notes": "At most 45 words: one specific strength, then one concrete change to make on the next attempt. Use two short sentences."
 }}
 """
-    content = _complete(
+    def validate(payload):
+        result = AnswerScore.model_validate(payload).model_dump()
+        if len(result["notes"].split()) > 45:
+            raise ValueError("Answer feedback exceeds 45 words")
+        return result
+    return _validated_feedback(
         [
             {"role": "system", "content": "Return valid JSON only. Be fair but constructive."},
             {"role": "user", "content": prompt},
         ],
-        json_mode=True,
+        validate,
     )
-    return AnswerScore.model_validate(_extract_json(content)).model_dump()
 
 
 def generate_overview(
@@ -126,7 +161,12 @@ def generate_overview(
         "aggregate": aggregate,
         "weak_points": weak_points,
     }
-    prompt = f"""Write a concise mock interview feedback overview (3-5 short paragraphs).
+    prompt = f"""Give focused mock interview coaching. Return JSON only with:
+{{"keep": "one evidenced strength, at most 25 words", "actions": ["action 1", "action 2", "action 3"]}}
+Each action must be at most 25 words, start with a practical verb, and describe a specific change for the next attempt.
+Prioritize the three most useful improvements; refer to a question or example when available.
+Do not repeat scores, narrate metrics, add introductory praise, or give vague advice such as 'be confident'.
+Do not invent achievements, numbers, or experiences for the candidate.
 
 Job context (truncated):
 {job_text[:1500]}
@@ -134,12 +174,15 @@ Job context (truncated):
 Metrics JSON:
 {dumps(payload)}
 
-Cover: overall impression, top strengths, top weak points to practice, and 3 concrete next steps.
-Do not diagnose medical conditions. Use phrasing like "delivery signals" not clinical labels.
+Null eye-contact scores and uncertain samples are missing evidence, not poor eye contact.
+Head direction is not eye contact. Eye-contact values are calibrated estimates, not ground truth.
+Do not infer emotion, confidence, personality, or ability from facial expressions or voice metrics.
+Do not diagnose medical conditions. If there is no recorded answer, say so and focus on preparing a retry.
 """
-    return _complete(
+    result = _validated_feedback(
         [
             {"role": "system", "content": "You are a supportive interview coach."},
             {"role": "user", "content": prompt},
-        ]
-    ) or "No overview generated."
+        ], FeedbackOverview.model_validate,
+    )
+    return f"Keep: {result.keep}\n\nNext attempt:\n" + "\n".join(f"{i}. {action}" for i, action in enumerate(result.actions, 1))

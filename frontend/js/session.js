@@ -29,6 +29,8 @@ let timestamps = [];
 let pollTimer = null;
 let recordingBlob = null;
 let uploadSucceeded = false;
+let calibrationWindows = [];
+const calibrationTargets = ["lens", "screen", "lens_check", "screen_check"];
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
@@ -90,8 +92,27 @@ function updateTimer() {
   }
 }
 
+function beginCalibration() {
+  phase = "calibration_prep";
+  const index = calibrationWindows.length;
+  phaseLabel.textContent = "Eye-contact setup · Get ready";
+  questionMeta.textContent = `Step ${index + 1} of 4`;
+  questionText.textContent = index % 2 === 0 ? "Look directly at the camera lens" : "Look directly at this text on your screen";
+  statusEl.textContent = "Get into position for 3 seconds, then hold your gaze for 7 seconds. Keep your head still and stay silent.";
+  skipBtn.textContent = "Skip eye-contact setup";
+  stopBtn.textContent = "Cancel";
+  skipBtn.hidden = stopBtn.hidden = false;
+  phaseEndsAt = performance.now() + 3000;
+  timerEl.textContent = formatTime(3);
+  clearInterval(timerInterval);
+  timerInterval = setInterval(updateTimer, 200);
+}
+
 function beginPrep() {
   phase = "prep";
+  statusEl.textContent = "Recording in progress.";
+  skipBtn.textContent = "Skip question";
+  stopBtn.textContent = "Finish & analyze";
   const q = interview.selected_questions[questionIndex];
   timestamps[questionIndex] = {
     question_id: q.id, question_index: questionIndex,
@@ -125,6 +146,26 @@ function beginAnswer() {
 
 function onPhaseComplete() {
   clearInterval(timerInterval);
+  if (phase === "calibration_prep") {
+    phase = "calibration";
+    calibrationWindows.push({ target: calibrationTargets[calibrationWindows.length], start: nowSeconds(), end: 0 });
+    phaseLabel.textContent = "Eye-contact setup · Hold your gaze";
+    statusEl.textContent = "Hold your gaze on the target. Keep your head still and stay silent.";
+    phaseEndsAt = performance.now() + 7000;
+    timerEl.textContent = formatTime(7);
+    timerInterval = setInterval(updateTimer, 200);
+    return;
+  }
+  if (phase === "calibration") {
+    calibrationWindows[calibrationWindows.length - 1].end = nowSeconds();
+    // A suspended/background tab cannot provide a trustworthy calibration interval.
+    if (calibrationWindows.at(-1).end - calibrationWindows.at(-1).start > 8) {
+      calibrationWindows = [];
+      beginCalibration();
+    } else if (calibrationWindows.length < calibrationTargets.length) beginCalibration();
+    else beginPrep();
+    return;
+  }
   if (phase === "prep") {
     if (!timestamps[questionIndex]) {
       timestamps[questionIndex] = {
@@ -151,6 +192,11 @@ function onPhaseComplete() {
 }
 
 function skipQuestion() {
+  if (phase === "calibration" || phase === "calibration_prep") {
+    calibrationWindows = [];
+    beginPrep();
+    return;
+  }
   if (phase !== "prep" && phase !== "answer") return;
   clearInterval(timerInterval);
   if (phase === "prep") {
@@ -176,6 +222,22 @@ function skipQuestion() {
 async function finishInterview() {
   if (phase === "done" || phase === "idle") return;
   clearInterval(timerInterval);
+  if (phase === "calibration" || phase === "calibration_prep") {
+    phase = "done";
+    skipBtn.hidden = stopBtn.hidden = true;
+    await stopRecording();
+    mediaStream?.getTracks().forEach((track) => track.stop());
+    preview.srcObject = null;
+    previewWrap.hidden = true;
+    calibrationWindows = [];
+    phase = "idle";
+    phaseLabel.textContent = "Ready";
+    timerEl.textContent = "--";
+    questionText.textContent = "Press begin when you are ready.";
+    statusEl.textContent = "Setup cancelled. No recording was uploaded.";
+    startBtn.disabled = false;
+    return;
+  }
   const current = timestamps[questionIndex];
   if (current && phase === "answer") current.answer_end = nowSeconds();
   if (current && phase === "prep") current.answer_start = current.answer_end = nowSeconds();
@@ -207,6 +269,7 @@ async function uploadRecording() {
   const form = new FormData();
   form.append("recording", recordingBlob, "recording.webm");
   form.append("timestamps", JSON.stringify(timestamps));
+  form.append("calibration", JSON.stringify(calibrationWindows));
   const response = await fetch(`/api/interviews/${interviewId}/upload`, { method: "POST", body: form });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
@@ -251,14 +314,9 @@ startBtn.addEventListener("click", async () => {
     startRecording();
     timestamps = [];
     questionIndex = 0;
-    timestamps[0] = {
-      question_id: interview.selected_questions[0].id,
-      question_index: 0,
-      prep_start: nowSeconds(),
-      answer_start: 0,
-      answer_end: 0,
-    };
-    beginPrep();
+    calibrationWindows = [];
+    if (interview.settings.record_mode === "mic") beginPrep();
+    else beginCalibration();
   } catch (err) {
     if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
     statusEl.textContent = `Media error: ${err.message}`;
@@ -304,6 +362,7 @@ async function init() {
   }
   questionText.textContent = "Press begin when you are ready.";
   questionMeta.textContent = `${interview.selected_questions.length} questions configured`;
+  statusEl.textContent = interview.settings.record_mode === "mic" ? "" : "Starts with a 40-second eye-contact setup: four steps, each with 3 seconds to prepare and 7 seconds to hold your gaze. You can skip it; eye contact will then be shown as uncertain.";
   startBtn.disabled = false;
 }
 

@@ -1,4 +1,5 @@
 import math
+import json
 import wave
 from pathlib import Path
 from typing import Any, Callable
@@ -7,7 +8,7 @@ import av
 import numpy as np
 
 from backend.config import settings
-from backend.services import asr, face, llm, voice
+from backend.services import asr, face, gaze, llm, voice
 from backend.services.json_io import dumps, write_json
 
 ProgressCallback = Callable[[str, int, str], None]
@@ -141,7 +142,7 @@ def compute_weak_points(per_question: list[dict[str, Any]]) -> list[dict[str, An
                 {"metric": f"{qid}_specificity", "label": "Answer specificity", "score": answer.get("specificity", 0)},
                 {"metric": f"{qid}_structure", "label": "Answer structure", "score": answer.get("structure", 0)},
                 {"metric": f"{qid}_delivery", "label": "Speech delivery", "score": speech.get("score", 0)},
-                {"metric": f"{qid}_face", "label": "Face and gaze", "score": face_data.get("score", 0)},
+                {"metric": f"{qid}_face", "label": "Estimated eye contact", "score": face_data.get("score")},
             ]
         )
     metrics = [m for m in metrics if m["score"] is not None]
@@ -208,6 +209,10 @@ def run_analysis(
     with wave.open(str(wav_path), "rb") as wav_file:
         duration = wav_file.getnframes() / wav_file.getframerate()
     timestamps, warnings = normalize_timestamps(timestamps, selected_questions, duration)
+    calibration_path = interview_dir / "calibration.json"
+    calibration = gaze.validate_calibration(
+        json.loads(calibration_path.read_text(encoding="utf-8")) if calibration_path.exists() else [],
+        before=min(duration, min(t["prep_start"] for t in timestamps)))
 
     report("transcribe", 20, "Transcribing with local Whisper...")
     transcript = asr.transcribe_audio(wav_path)
@@ -216,7 +221,9 @@ def run_analysis(
     report("face", 40, "Analyzing face and gaze...")
     face_result = {"frames": [], "summary": {"score": None}}
     if record_mode in {"both", "camera"} and recording.exists():
-        face_result = face.analyze_video(recording)
+        face_result = face.analyze_video(recording, calibration=calibration)
+        if face_result.get("calibration", {}).get("status") == "unavailable":
+            warnings.append(face_result["calibration"]["reason"])
 
     per_question: list[dict[str, Any]] = []
     total = max(len(selected_questions), 1)
@@ -275,6 +282,8 @@ def run_analysis(
         "transcript": transcript,
         "face_frames": face_result["frames"],
         "face_summary": face_result["summary"],
+        "eye_contact_calibration": face_result.get("calibration"),
+        "analysis_version": 2,
         "per_question": per_question,
         "aggregate": aggregate,
         "weak_points": weak_points,

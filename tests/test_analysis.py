@@ -161,19 +161,6 @@ class TranscriptAndScoringTests(unittest.TestCase):
 
 
 class FaceTests(unittest.TestCase):
-    def test_camera_facing_proxy_is_scale_invariant_and_rejects_sideways_eyes(self):
-        points = np.full((478, 2), 0.5)
-        points[33], points[133] = [0.30, 0.4], [0.40, 0.4]
-        points[362], points[263] = [0.60, 0.4], [0.70, 0.4]
-        points[468:473], points[473:478] = [0.35, 0.4], [0.65, 0.4]
-        points[1] = [0.50, 0.60]
-        def landmarks(values):
-            return [SimpleNamespace(x=x, y=y) for x, y in values]
-        for scale in [0.25, 0.5, 1.0]:
-            self.assertTrue(face._looking_at_camera(landmarks(points * scale + 0.1), 640, 480))
-        points[468:473, 0] += 0.04
-        self.assertFalse(face._looking_at_camera(landmarks(points), 640, 480))
-
     def fake_container(self):
         container = MagicMock()
         container.__enter__.return_value = container
@@ -227,9 +214,9 @@ class FaceTests(unittest.TestCase):
         self.assertTrue(0 < confidence < 1)
         np.testing.assert_allclose(net.setInput.call_args.args[0], 1)
 
-    def test_no_face_is_zero_but_no_frames_is_unavailable(self):
+    def test_no_face_and_no_frames_are_unavailable_not_poor_eye_contact(self):
         self.assertIsNone(face.summarize_frames([])["score"])
-        self.assertEqual(face.summarize_frames([{"face_detected": False}])["score"], 0)
+        self.assertIsNone(face.summarize_frames([{"face_detected": False}])["score"])
 
 
 class PipelineAndApiTests(unittest.TestCase):
@@ -257,7 +244,7 @@ class PipelineAndApiTests(unittest.TestCase):
         score = {"adequacy": 80, "specificity": 70, "structure": 75, "ambiguity_penalty": 0, "overall": 75, "notes": "Good"}
         for mode in ["mic", "both", "camera"]:
             with patch.object(asr, "transcribe_audio", return_value=transcript), \
-                 patch.object(llm, "_complete", side_effect=[json.dumps(score), "Practice details"]), \
+                 patch.object(llm, "_complete", side_effect=[json.dumps(score), json.dumps({"keep": "Specific example", "actions": ["Describe your role.", "Explain the result.", "Practise once aloud."]})]), \
                  patch.object(face, "analyze_video", return_value={"frames": [], "summary": {"score": None}}) as video:
                 result = scoring.run_analysis(self.iid, self.directory, QUESTIONS,
                                               [timestamp(0, 2), timestamp(2, 2, 1)], mode, "Role")
@@ -274,6 +261,21 @@ class PipelineAndApiTests(unittest.TestCase):
                                       files={"recording": ("recording.webm", b"media")})
             self.assertEqual(result.status_code, 400)
         self.assertFalse((self.directory / "recording.webm").exists())
+
+    def test_upload_validates_and_persists_calibration(self):
+        calibration = [{"target": target, "start": i * 3 + 1, "end": i * 3 + 3}
+                       for i, target in enumerate(["lens", "screen", "lens_check", "screen_check"])]
+        for invalid in ["null", "bad", json.dumps(calibration[:-1])]:
+            result = self.client.post(f"/api/interviews/{self.iid}/upload",
+                                      data={"timestamps": json.dumps([timestamp(12, 14)]), "calibration": invalid},
+                                      files={"recording": ("recording.webm", b"media")})
+            self.assertEqual(result.status_code, 400)
+        with patch.object(interviews, "_run_analysis_job"):
+            result = self.client.post(f"/api/interviews/{self.iid}/upload",
+                                      data={"timestamps": json.dumps([timestamp(12, 14)]), "calibration": json.dumps(calibration)},
+                                      files={"recording": ("recording.webm", b"media")})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(json.loads((self.directory / "calibration.json").read_text()), calibration)
 
     def test_retry_resets_stale_progress_and_blocks_duplicate_job(self):
         (self.directory / "recording.webm").write_bytes(b"media")

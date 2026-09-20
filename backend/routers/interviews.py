@@ -10,7 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 from backend import db
 from backend.config import settings
 from backend.models import InterviewCreate, QuestionTimestamp
-from backend.services import scoring
+from backend.services import gaze, scoring
 from backend.services.json_io import write_json
 
 router = APIRouter(prefix="/api/interviews", tags=["interviews"])
@@ -195,11 +195,16 @@ async def upload_recording(
     background_tasks: BackgroundTasks,
     timestamps: str = Form(...),
     recording: UploadFile = File(...),
+    calibration: str = Form("[]"),
 ) -> dict[str, Any]:
     interview = db.get_interview(interview_id)
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
     ts_payload = _parse_timestamps(timestamps, interview)
+    try:
+        calibration_payload = gaze.validate_calibration(json.loads(calibration), before=min(t["prep_start"] for t in ts_payload))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid eye-contact calibration") from exc
     content = await recording.read()
     if not content:
         raise HTTPException(status_code=400, detail="Recording is empty")
@@ -211,6 +216,7 @@ async def upload_recording(
     try:
         dest.write_bytes(content)
         write_json(interview_dir / "timestamps.json", ts_payload)
+        write_json(interview_dir / "calibration.json", calibration_payload)
         _queue_analysis(interview_id, ts_payload, background_tasks)
     except Exception:
         db.update_interview_status(interview_id, "error")

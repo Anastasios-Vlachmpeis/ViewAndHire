@@ -39,7 +39,7 @@ Open http://127.0.0.1:8000
 
 1. **Listing** — paste job post, optionally add your own questions (one per line), and generate a combined question bank
 2. **Settings** — timers, question selection, recording mode
-3. **Session** — prep/answer timers, continuous recording
+3. **Session** — optional 40-second eye-contact calibration, prep/answer timers, continuous recording
 4. **Results** — scores, replay with face box, save interview
 5. **History** — reopen saved sessions or retake with the same or different questions from their full saved bank
 
@@ -51,12 +51,15 @@ Recordings stay in `data/interviews/`. Job listing text, questions, transcripts,
 
 ## Notes
 
-- Face/gaze scores use pretrained heuristics, not clinical assessment.
+- The video overlay separates head orientation from estimated eye contact (Toward lens / Away / Uncertain).
 - Speech "confidence" uses acoustic proxies (pitch, pauses, fillers).
 - First analysis run downloads Whisper and face model weights.
 - Run one server worker for this local app. Interrupted analyses become retryable after a restart.
 - Existing recordings affected by the old stop-button bug (`answer_end: 0`) recover their final answer end from the audio duration. The results display a recovery notice; original timestamps remain unchanged.
-- Camera-facing and expression estimates are uncalibrated proxies, not measured eye contact or emotional state. Scores are coaching heuristics, not validated hiring assessments.
+- Eye-contact calibration alternates lens/screen prompts, then repeats both as separate checks. Each step has a 3-second preparation countdown followed by 7 seconds of calibration; preparation is excluded from calibration samples. All setup footage is excluded from answer scoring. Skipping or failing calibration leaves eye contact uncertain, including on old recordings.
+- Horizontal and vertical iris positions are compared with the user's lens reference. Small eyes, closed eyelids, large head changes, ambiguous positions and transitions produce Uncertain. Known eye samples must cover at least half the answer and contain at least 10 samples to contribute a score. Coverage is shown beside each estimate; unavailable eye scores are excluded and the overall score reweighted.
+- Head direction and facial expressions do not contribute to the eye-contact score. Expressions do not establish emotional state. This geometric estimate is not a validated gaze tracker or hiring assessment; glasses, lighting, camera placement and head movement can reduce coverage or accuracy. Repeat checks test calibration consistency, not real-world accuracy. MediaPipe itself [does not infer where a person is looking](https://github.com/google-ai-edge/mediapipe/blob/master/docs/solutions/iris.md).
+- Feedback contains one strength and three next-attempt actions (at most 25 words each). Per-answer notes are limited to 45 words. Malformed or overlong feedback gets one automatic repair attempt.
 
 ## Verification
 

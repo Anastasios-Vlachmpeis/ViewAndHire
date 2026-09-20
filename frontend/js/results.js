@@ -18,7 +18,7 @@ function renderAggregate(agg) {
     { label: "Overall", value: agg.overall },
     { label: "Answer quality", value: agg.answer_quality },
     { label: "Speech delivery", value: agg.speech_delivery },
-    { label: "Face & gaze", value: agg.face_gaze },
+    { label: "Eye contact (estimate)", value: analysis?.analysis_version >= 2 ? agg.face_gaze : null },
   ];
   aggregateScores.innerHTML = cards
     .filter((c) => c.value !== null && c.value !== undefined)
@@ -74,7 +74,6 @@ function renderBreakdown(perQuestion) {
       <div class="card" style="margin-bottom:12px;">
         <h3>Question ${idx + 1}</h3>
         <p>${escapeHtml(q.question)}</p>
-        <p class="muted"><em>Transcript:</em> ${escapeHtml(q.transcript || "(no speech detected)")}</p>
         <div class="grid-2">
           <div>
             <strong>Answer quality: ${Math.round(q.answer_quality.overall)}</strong>
@@ -86,9 +85,15 @@ function renderBreakdown(perQuestion) {
           <div>
             <strong>Speech delivery: ${q.speech_delivery.score !== null ? Math.round(q.speech_delivery.score) : "N/A"}</strong>
             <p class="muted">${q.speech_delivery.notes || ""}</p>
-            <div>Face & gaze: ${q.face_gaze.score !== null ? Math.round(q.face_gaze.score) : "N/A"}</div>
+            <div>Eye contact (estimate): ${q.face_gaze.eye_contact_ratio != null ? `${Math.round(q.face_gaze.eye_contact_ratio * 100)}% of clear samples` : "Uncertain"}</div>
+            <div class="muted">Clear eye samples: ${Math.round((q.face_gaze.eye_contact_coverage || 0) * 100)}% of this answer</div>
+            <div class="muted">Head facing camera: ${q.face_gaze.head_facing_ratio != null ? `${Math.round(q.face_gaze.head_facing_ratio * 100)}%` : "Uncertain"}</div>
           </div>
         </div>
+        <details class="feedback-details">
+          <summary>View transcript</summary>
+          <p class="muted">${escapeHtml(q.transcript || "(no speech detected)")}</p>
+        </details>
       </div>`
     )
     .join("");
@@ -128,8 +133,11 @@ function setupOverlay() {
       faceOverlay.style.transform = `translate(${x}px, ${y}px)`;
       faceOverlay.style.width = `${w}px`;
       faceOverlay.style.height = `${h}px`;
-      faceOverlay.style.setProperty("--tracking-color", frame.looking_at_camera ? "#22c55e" : "#f59e0b");
-      const labels = `Expression: ${escapeHtml(frame.expression || "unknown")}<br>Camera-facing estimate: ${frame.looking_at_camera ? "Yes" : "No"}`;
+      const eyeState = frame.eye_contact?.state || "uncertain";
+      const eyeLabels = { toward_lens: "Toward lens", away: "Away", uncertain: "Uncertain" };
+      const headFacing = frame.head_pose?.facing_camera;
+      faceOverlay.style.setProperty("--tracking-color", eyeState === "toward_lens" ? "#22c55e" : eyeState === "away" ? "#f59e0b" : "#94a3b8");
+      const labels = `Expression: ${escapeHtml(frame.expression || "unknown")}<br>Head facing camera: ${headFacing == null ? "Uncertain" : headFacing ? "Yes" : "No"}<br>Eye contact (estimate): ${eyeLabels[eyeState] || "Uncertain"}`;
       if (overlayLabels.innerHTML !== labels) overlayLabels.innerHTML = labels;
       // Attach above the face border, or inside its top edge near the video boundary.
       faceOverlay.dataset.labelInside = "false";
@@ -182,6 +190,7 @@ async function init() {
   renderAggregate(analysis.aggregate);
   renderWeakPoints(analysis.weak_points || []);
   overview.textContent = analysis.overview || "";
+  overview.style.whiteSpace = "pre-line";
   renderTimeline(analysis.per_question || []);
   renderBreakdown(analysis.per_question || []);
   replayVideo.src = `/api/interviews/${interviewId}/media/recording.webm`;

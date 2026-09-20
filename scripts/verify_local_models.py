@@ -11,7 +11,7 @@ from pathlib import Path
 
 from backend import db
 from backend.config import settings
-from backend.services import asr, face, scoring, voice
+from backend.services import asr, face, gaze, scoring, voice
 
 
 def main():
@@ -38,7 +38,12 @@ def main():
             print(f"{interview_id}: transcribing locally", flush=True)
             transcript = asr.transcribe_audio(wav)
             print(f"{interview_id}: analyzing video locally", flush=True)
-            video = face.analyze_video(recording) if interview["settings"]["record_mode"] != "mic" else {"frames": []}
+            calibration_path = directory / "calibration.json"
+            calibration = gaze.validate_calibration(
+                json.loads(calibration_path.read_text(encoding="utf-8")) if calibration_path.exists() else [],
+                before=min(duration, min(ts["prep_start"] for ts in timestamps)),
+            )
+            video = face.analyze_video(recording, calibration=calibration) if interview["settings"]["record_mode"] != "mic" else {"frames": []}
             answer_checks = []
             for index, ts in enumerate(timestamps):
                 segment = Path(temporary) / f"segment_{index}.wav"
@@ -55,6 +60,7 @@ def main():
             print(json.dumps({"interview_id": interview_id, "duration": duration,
                               "video_samples": len(times), "last_video_time": times[-1] if times else None,
                               "detected_faces": sum(f["face_detected"] for f in video["frames"]),
+                              "eye_contact_calibration": video.get("calibration"),
                               "answers": answer_checks, "warnings": warnings,
                               "elapsed_seconds": round(time.monotonic() - started, 1),
                               "feedback_api_called": False, "saved_results_changed": False}), flush=True)

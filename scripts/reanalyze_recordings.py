@@ -31,7 +31,7 @@ def main():
         try:
             backup = directory / "analysis_backups" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
             backup.mkdir(parents=True)
-            for name in ("analysis.json", "progress.json", "timestamps.json", "transcript.json"):
+            for name in ("analysis.json", "progress.json", "timestamps.json", "transcript.json", "calibration.json"):
                 if (directory / name).exists():
                     shutil.copy2(directory / name, backup / name)
             db.update_interview_status(interview_id, "analyzing")
