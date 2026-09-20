@@ -6,4 +6,4 @@ __pycache__/
 backend/weights/
 *.webm
 *.wav
-Scoring.txt/
+Scoring.txt
