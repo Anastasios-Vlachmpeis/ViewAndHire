@@ -23,6 +23,7 @@ def init_db() -> None:
                 job_text TEXT NOT NULL,
                 company TEXT,
                 role_title TEXT,
+                custom_questions_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL
             );
 
@@ -49,6 +50,9 @@ def init_db() -> None:
             );
             """
         )
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(listings)")}
+        if "custom_questions_json" not in columns:
+            conn.execute("ALTER TABLE listings ADD COLUMN custom_questions_json TEXT NOT NULL DEFAULT '[]'")
 
 
 @contextmanager
@@ -62,19 +66,21 @@ def get_connection():
         conn.close()
 
 
-def create_listing(job_text: str, company: str | None = None, role_title: str | None = None) -> dict[str, Any]:
+def create_listing(job_text: str, company: str | None = None, role_title: str | None = None,
+                   custom_questions: list[str] | None = None) -> dict[str, Any]:
     listing_id = str(uuid4())
     row = {
         "id": listing_id,
         "job_text": job_text,
         "company": company,
         "role_title": role_title,
+        "custom_questions": custom_questions or [],
         "created_at": _utc_now(),
     }
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO listings (id, job_text, company, role_title, created_at) VALUES (?, ?, ?, ?, ?)",
-            (listing_id, job_text, company, role_title, row["created_at"]),
+            "INSERT INTO listings (id, job_text, company, role_title, custom_questions_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (listing_id, job_text, company, role_title, json.dumps(row["custom_questions"]), row["created_at"]),
         )
     return row
 
@@ -98,7 +104,11 @@ def save_question_bank(listing_id: str, questions: list[dict[str, Any]]) -> dict
 def get_listing(listing_id: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         row = conn.execute("SELECT * FROM listings WHERE id = ?", (listing_id,)).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    data = dict(row)
+    data["custom_questions"] = json.loads(data.pop("custom_questions_json"))
+    return data
 
 
 def get_question_bank(bank_id: str) -> dict[str, Any] | None:

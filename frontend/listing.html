@@ -17,7 +17,7 @@
   <main class="container">
     <div class="card">
       <h1>Job listing</h1>
-      <p class="muted">Paste the full job post. The LLM will generate likely pre-screening questions.</p>
+      <p class="muted">Paste the full job post to generate likely pre-screening questions. You can also add your own below.</p>
       <div class="grid-2">
         <div>
           <label for="company">Company (optional)</label>
@@ -32,6 +32,11 @@
         <label for="jobText">Job listing</label>
         <textarea id="jobText" placeholder="Paste the job description here..."></textarea>
       </div>
+      <div style="margin-top: 12px;">
+        <label for="customQuestions">Your own questions (optional)</label>
+        <textarea id="customQuestions" rows="4" aria-describedby="customQuestionsHelp" placeholder="Why do you want to work at this company?&#10;Tell me about a project you are proud of."></textarea>
+        <p id="customQuestionsHelp" class="muted">One question per line, up to 20 questions (2,000 characters each). These will be added alongside the generated questions. Choose which to practise in interview settings.</p>
+      </div>
       <div class="actions">
         <button class="btn btn-primary" id="generateBtn">Generate questions</button>
       </div>
@@ -39,7 +44,7 @@
     </div>
     <div class="card" id="questionsCard" hidden>
       <h2>Question bank</h2>
-      <p class="muted">Review generated questions, then continue to interview settings.</p>
+      <p class="muted">Review your questions, then continue to interview settings.</p>
       <div id="questionsList"></div>
       <div class="actions">
         <a class="btn btn-primary" id="continueBtn" href="#">Continue to settings</a>

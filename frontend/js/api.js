@@ -28,6 +28,12 @@ function getSession(key, fallback = null) {
   }
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[char]));
+}
+
 function scoreColor(score) {
   if (score >= 75) return "var(--success)";
   if (score >= 50) return "var(--warning)";

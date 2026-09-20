@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/listings", tags=["listings"])
 
 @router.post("")
 def create_listing(payload: ListingCreate) -> dict[str, Any]:
-    listing = db.create_listing(payload.job_text, payload.company, payload.role_title)
+    listing = db.create_listing(payload.job_text, payload.company, payload.role_title, payload.custom_questions)
     return listing
 
 
@@ -34,7 +34,29 @@ def generate_questions(listing_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=f"Could not parse generated questions: {exc}") from exc
-    bank = db.save_question_bank(listing_id, questions)
+    custom_questions = []
+    seen_text = set()
+    used_ids = {q["id"] for q in questions}
+    for text in listing.get("custom_questions", []):
+        key = " ".join(text.split()).casefold()
+        if key in seen_text:
+            continue
+        seen_text.add(key)
+        question_id = f"custom{len(custom_questions) + 1}"
+        while question_id in used_ids:
+            question_id += "_"
+        used_ids.add(question_id)
+        custom_questions.append({
+            "id": question_id,
+            "question": text,
+            "type": "custom",
+            "source": "custom",
+            "likelihood": 3,
+            "rationale": "Added by you.",
+            "scoring_hints": "Answer the question directly, with relevant detail and concrete examples where appropriate.",
+        })
+    generated = [q for q in questions if " ".join(q["question"].split()).casefold() not in seen_text]
+    bank = db.save_question_bank(listing_id, custom_questions + generated)
     return bank
 
 

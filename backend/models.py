@@ -1,12 +1,15 @@
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 
 class ListingCreate(BaseModel):
     job_text: str = Field(min_length=20)
     company: str | None = None
     role_title: str | None = None
+    custom_questions: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]] = Field(
+        default_factory=list, max_length=20
+    )
 
 
 class QuestionItem(BaseModel):

@@ -54,7 +54,7 @@ function renderTimeline(perQuestion) {
       (q, idx) => `
       <div class="timeline-item" data-index="${idx}" data-time="${q.timestamps.answer_start}">
         <strong>Q${idx + 1}</strong>
-        <p class="muted">${q.question.slice(0, 80)}${q.question.length > 80 ? "..." : ""}</p>
+        <p class="muted">${escapeHtml(q.question.slice(0, 80))}${q.question.length > 80 ? "..." : ""}</p>
         <div class="muted">Overall answer: ${Math.round(q.answer_quality.overall)}</div>
       </div>`
     )
@@ -73,12 +73,12 @@ function renderBreakdown(perQuestion) {
       (q, idx) => `
       <div class="card" style="margin-bottom:12px;">
         <h3>Question ${idx + 1}</h3>
-        <p>${q.question}</p>
-        <p class="muted"><em>Transcript:</em> ${q.transcript || "(no speech detected)"}</p>
+        <p>${escapeHtml(q.question)}</p>
+        <p class="muted"><em>Transcript:</em> ${escapeHtml(q.transcript || "(no speech detected)")}</p>
         <div class="grid-2">
           <div>
             <strong>Answer quality: ${Math.round(q.answer_quality.overall)}</strong>
-            <p class="muted">${q.answer_quality.notes}</p>
+            <p class="muted">${escapeHtml(q.answer_quality.notes)}</p>
             <div>Adequacy ${Math.round(q.answer_quality.adequacy)}</div>
             <div>Specificity ${Math.round(q.answer_quality.specificity)}</div>
             <div>Structure ${Math.round(q.answer_quality.structure)}</div>

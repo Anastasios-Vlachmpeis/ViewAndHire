@@ -37,7 +37,7 @@ Open http://127.0.0.1:8000
 
 ## Flow
 
-1. **Listing** — paste job post, generate questions
+1. **Listing** — paste job post, optionally add your own questions (one per line), and generate a combined question bank
 2. **Settings** — timers, question selection, recording mode
 3. **Session** — prep/answer timers, continuous recording
 4. **Results** — scores, replay with face box, save interview
@@ -62,7 +62,7 @@ Run the regression suites from the project root:
 
 ```bash
 python -m unittest discover -s tests -v
-node --test tests/session.test.cjs
+node --test tests/*.test.cjs
 ```
 
 Verify real recordings using the installed local models without calling the feedback API or replacing saved results:

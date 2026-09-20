@@ -18,10 +18,10 @@ function renderPickList() {
     .map(
       (q, idx) => `
       <label class="question-item">
-        <input type="checkbox" data-id="${q.id}" ${idx < 5 ? "checked" : ""}>
-        <span class="badge">${q.type}</span>
-        <span class="badge">${q.likelihood}/5</span>
-        ${q.question}
+        <input type="checkbox" data-id="${escapeHtml(q.id)}" ${idx < 5 ? "checked" : ""}>
+        <span class="badge">${q.source === "custom" ? "Your question" : escapeHtml(q.type)}</span>
+        ${q.source === "custom" ? "" : `<span class="badge">${escapeHtml(q.likelihood)}/5</span>`}
+        ${escapeHtml(q.question)}
       </label>`
     )
     .join("");
