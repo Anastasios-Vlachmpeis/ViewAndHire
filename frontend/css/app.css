@@ -248,28 +248,44 @@ textarea {
   overflow: hidden;
 }
 
-.video-stage video,
-.video-stage canvas {
+.video-stage video {
   width: 100%;
   display: block;
 }
 
-.video-stage canvas {
+.face-overlay {
+  --tracking-color: #22c55e;
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
+  border: 3px solid var(--tracking-color);
   pointer-events: none;
 }
 
 .overlay-labels {
   position: absolute;
-  left: 12px;
-  bottom: 12px;
-  background: rgba(0, 0, 0, 0.65);
+  left: -3px;
+  bottom: 100%;
+  width: calc(100% + 6px);
+  border: 3px solid var(--tracking-color);
+  border-bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
   color: #fff;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: 6px 6px 0 0;
   font-size: 13px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.face-overlay[data-label-inside="true"] .overlay-labels {
+  top: 0;
+  bottom: auto;
+  left: 0;
+  width: 100%;
+  border: 0;
+  border-bottom: 2px solid var(--tracking-color);
+  border-radius: 0;
 }
 
 .timeline-item {

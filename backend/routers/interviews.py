@@ -48,9 +48,13 @@ def _select_questions(bank_questions: list[dict[str, Any]], settings_payload: di
     mode = settings_payload["selection_mode"]
     count = settings_payload["question_count"]
     if mode == "predetermined":
-        selected_ids = set(settings_payload.get("selected_question_ids", []))
-        chosen = [q for q in bank_questions if q["id"] in selected_ids]
-        return chosen[:count]
+        selected_ids = settings_payload.get("selected_question_ids", [])
+        by_id = {q["id"]: q for q in bank_questions}
+        if len(selected_ids) != len(set(selected_ids)) or any(qid not in by_id for qid in selected_ids):
+            raise HTTPException(status_code=400, detail="Select distinct questions from this question bank")
+        if len(selected_ids) != count:
+            raise HTTPException(status_code=400, detail="Question count must match the selected questions")
+        return [by_id[qid] for qid in selected_ids]
     weights = [max(q.get("likelihood", 1), 1) for q in bank_questions]
     pool = bank_questions.copy()
     chosen: list[dict[str, Any]] = []
@@ -71,11 +75,14 @@ def create_interview(payload: InterviewCreate) -> dict[str, Any]:
     bank = db.get_question_bank(payload.question_bank_id)
     if not bank:
         raise HTTPException(status_code=404, detail="Question bank not found")
+    if bank["listing_id"] != payload.listing_id:
+        raise HTTPException(status_code=400, detail="Question bank belongs to a different job listing")
 
     settings_payload = payload.settings.model_dump()
     selected = _select_questions(bank["questions"], settings_payload)
     if not selected:
         raise HTTPException(status_code=400, detail="No questions selected for this interview")
+    settings_payload["question_count"] = len(selected)
 
     interview = db.create_interview(payload.listing_id, payload.question_bank_id, settings_payload, selected)
     return interview
@@ -87,6 +94,7 @@ def list_interviews(saved: bool = False) -> list[dict[str, Any]]:
     summaries = []
     for item in interviews:
         listing = db.get_listing(item["listing_id"]) or {}
+        bank = db.get_question_bank(item["question_bank_id"])
         aggregate_score = None
         analysis_path = settings.interviews_dir / item["id"] / "analysis.json"
         if item["status"] == "complete" and analysis_path.exists():
@@ -99,6 +107,8 @@ def list_interviews(saved: bool = False) -> list[dict[str, Any]]:
                 "saved": item["saved"],
                 "created_at": item["created_at"],
                 "settings": item["settings"],
+                "question_count": len(item["selected_questions"]),
+                "question_bank_count": len(bank["questions"]) if bank else 0,
                 "aggregate_score": aggregate_score,
                 "role_title": listing.get("role_title"),
                 "company": listing.get("company"),
@@ -235,4 +245,9 @@ def save_interview(interview_id: str) -> dict[str, Any]:
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
     db.mark_interview_saved(interview_id)
-    return {"saved": True, "interview_id": interview_id}
+    # Banks are persisted independently and immutable: keep the original bank link,
+    # including questions that were not selected for this attempt.
+    bank = db.get_question_bank(interview["question_bank_id"])
+    return {"saved": True, "interview_id": interview_id,
+            "question_bank_id": interview["question_bank_id"],
+            "question_bank_count": len(bank["questions"]) if bank else 0}

@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,9 +21,10 @@ class CustomQuestionTests(unittest.TestCase):
         config.start()
         self.addCleanup(config.stop)
         # Start from the previous schema to exercise migration and existing rows.
-        with sqlite3.connect(settings.db_path) as conn:
+        with closing(sqlite3.connect(settings.db_path)) as conn:
             conn.execute("CREATE TABLE listings (id TEXT PRIMARY KEY, job_text TEXT NOT NULL, company TEXT, role_title TEXT, created_at TEXT NOT NULL)")
             conn.execute("INSERT INTO listings VALUES ('old', 'An existing job listing', NULL, NULL, '2026-01-01')")
+            conn.commit()
         db.init_db()
         app = FastAPI()
         app.include_router(listings.router)
@@ -75,6 +77,56 @@ class CustomQuestionTests(unittest.TestCase):
                 response = self.client.post("/api/listings", json={"job_text": "A software engineering job listing",
                                                                   "custom_questions": questions})
                 self.assertEqual(response.status_code, 422)
+
+    def test_saved_bank_supports_same_and_different_questions_without_replacing_attempt(self):
+        listing = db.create_listing("A software engineering job listing", custom_questions=["My question?"])
+        custom = dict(self.generated[0], id="custom1", question="My question?", source="custom", type="custom")
+        other = dict(self.generated[0], id="q2", question="An unused question?")
+        bank = db.save_question_bank(listing["id"], [self.generated[0], custom, other])
+        settings_payload = {"question_count": 2, "selection_mode": "predetermined",
+                            "selected_question_ids": ["custom1", "q1"], "prep_seconds": 15,
+                            "answer_seconds": 90, "record_mode": "mic"}
+        payload = {"listing_id": listing["id"], "question_bank_id": bank["id"], "settings": settings_payload}
+        original = self.client.post("/api/interviews", json=payload).json()
+        db.update_interview_status(original["id"], "complete")
+        recording = settings.interviews_dir / original["id"] / "recording.webm"
+        recording.write_bytes(b"original recording")
+        saved = self.client.post(f"/api/interviews/{original['id']}/save").json()
+        self.assertEqual(saved["question_bank_count"], 3)
+        self.assertEqual(saved["question_bank_id"], bank["id"])
+        # A later generation for the same listing must not replace the saved bank.
+        db.save_question_bank(listing["id"], [dict(other, question="New generation")])
+        db.init_db()
+        stored = self.client.get(f"/api/interviews/{original['id']}").json()
+        retained = self.client.get(f"/api/listings/banks/{stored['question_bank_id']}").json()
+        self.assertEqual(retained["questions"], bank["questions"])
+        same = self.client.post("/api/interviews", json=payload).json()
+        self.assertNotEqual(same["id"], original["id"])
+        self.assertEqual([q["id"] for q in same["selected_questions"]], ["custom1", "q1"])
+        payload["settings"] = dict(settings_payload, question_count=1, selected_question_ids=["q2"])
+        different = self.client.post("/api/interviews", json=payload).json()
+        self.assertEqual(different["selected_questions"], [other])
+        self.assertEqual(recording.read_bytes(), b"original recording")
+        self.assertEqual(db.get_interview(original["id"])["status"], "complete")
+        history = self.client.get("/api/interviews?saved=true").json()
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["question_count"], 2)
+        self.assertEqual(history[0]["question_bank_count"], 3)
+
+    def test_selection_rejects_unknown_questions_truncation_and_wrong_listing(self):
+        listing = db.create_listing("A software engineering job listing")
+        bank = db.save_question_bank(listing["id"], self.generated)
+        payload = {"listing_id": listing["id"], "question_bank_id": bank["id"],
+                   "settings": {"question_count": 1, "selection_mode": "predetermined"}}
+        for ids in [["unknown"], ["q1", "q1"], ["q1", "unknown"]]:
+            payload["settings"]["selected_question_ids"] = ids
+            self.assertEqual(self.client.post("/api/interviews", json=payload).status_code, 400)
+        payload["settings"]["selected_question_ids"] = ["q1"]
+        payload["settings"]["question_count"] = 2
+        self.assertEqual(self.client.post("/api/interviews", json=payload).status_code, 400)
+        payload["settings"]["question_count"] = 1
+        payload["listing_id"] = "old"
+        self.assertEqual(self.client.post("/api/interviews", json=payload).status_code, 400)
 
 
 if __name__ == "__main__":

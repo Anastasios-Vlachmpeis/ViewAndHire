@@ -19,10 +19,12 @@
       <h1>Interview results</h1>
       <div class="score-grid" id="aggregateScores"></div>
       <div class="actions">
-        <button class="btn btn-primary" id="saveBtn">Save interview</button>
+        <button class="btn btn-primary" id="saveBtn">Save interview &amp; questions</button>
+        <a class="btn btn-secondary" id="retakeBtn" hidden>Retake interview</a>
         <a class="btn btn-secondary" href="/listing">New interview</a>
       </div>
       <p id="saveStatus" class="muted"></p>
+      <p class="muted">Saving keeps the full question bank, including generated questions and your own. Retake with the same questions or choose different ones.</p>
       <p id="analysisWarnings" class="muted" hidden></p>
     </div>
 
@@ -41,8 +43,9 @@
         <h2>Replay with face tracking</h2>
         <div class="video-stage" id="videoStage">
           <video id="replayVideo" controls playsinline></video>
-          <canvas id="overlayCanvas"></canvas>
-          <div class="overlay-labels" id="overlayLabels">Waiting for playback...</div>
+          <div class="face-overlay" id="faceOverlay" hidden>
+            <div class="overlay-labels" id="overlayLabels"></div>
+          </div>
         </div>
       </div>
       <div>

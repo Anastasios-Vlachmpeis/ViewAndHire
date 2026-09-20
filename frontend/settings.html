@@ -16,7 +16,8 @@
   </header>
   <main class="container">
     <div class="card">
-      <h1>Interview settings</h1>
+      <h1 id="settingsHeading">Interview settings</h1>
+      <p id="retakeDescription" class="muted" hidden></p>
       <div class="grid-2">
         <div>
           <label for="questionCount">Number of questions</label>
@@ -48,6 +49,11 @@
       </div>
       <div id="pickQuestionsWrap" hidden style="margin-top: 16px;">
         <h3>Select questions (predetermined mode)</h3>
+        <p class="muted">Choose up to 20 questions. The interview will include every checked question.</p>
+        <div class="actions" id="retakeActions" hidden>
+          <button class="btn btn-secondary" id="previousQuestionsBtn">Use previous questions</button>
+          <button class="btn btn-secondary" id="clearQuestionsBtn">Clear selection</button>
+        </div>
         <div id="pickQuestionsList"></div>
       </div>
       <div class="actions">

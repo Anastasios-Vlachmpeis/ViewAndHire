@@ -7,7 +7,7 @@ const questionBreakdown = document.getElementById("questionBreakdown");
 const saveBtn = document.getElementById("saveBtn");
 const saveStatus = document.getElementById("saveStatus");
 const replayVideo = document.getElementById("replayVideo");
-const overlayCanvas = document.getElementById("overlayCanvas");
+const faceOverlay = document.getElementById("faceOverlay");
 const overlayLabels = document.getElementById("overlayLabels");
 
 let analysis = null;
@@ -109,16 +109,13 @@ function nearestFrame(time) {
 }
 
 function setupOverlay() {
-  const ctx = overlayCanvas.getContext("2d");
+  let animationId;
   const draw = () => {
     const width = replayVideo.clientWidth;
     const height = replayVideo.clientHeight;
-    overlayCanvas.width = width;
-    overlayCanvas.height = height;
-    ctx.clearRect(0, 0, width, height);
 
     const frame = nearestFrame(replayVideo.currentTime);
-    if (frame && frame.face_detected && frame.bbox) {
+    if (frame && frame.face_detected && frame.bbox && width && height) {
       const videoWidth = replayVideo.videoWidth || width;
       const videoHeight = replayVideo.videoHeight || height;
       const scaleX = width / videoWidth;
@@ -127,27 +124,36 @@ function setupOverlay() {
       const y = frame.bbox.y * scaleY;
       const w = frame.bbox.w * scaleX;
       const h = frame.bbox.h * scaleY;
-      ctx.strokeStyle = frame.looking_at_camera ? "#22c55e" : "#f59e0b";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(x, y, w, h);
-      overlayLabels.innerHTML = `
-        Expression: ${frame.expression || "unknown"}<br>
-        Camera-facing estimate: ${frame.looking_at_camera ? "Yes" : "No"}<br>
-        Time: ${replayVideo.currentTime.toFixed(1)}s
-      `;
+      faceOverlay.hidden = false;
+      faceOverlay.style.transform = `translate(${x}px, ${y}px)`;
+      faceOverlay.style.width = `${w}px`;
+      faceOverlay.style.height = `${h}px`;
+      faceOverlay.style.setProperty("--tracking-color", frame.looking_at_camera ? "#22c55e" : "#f59e0b");
+      const labels = `Expression: ${escapeHtml(frame.expression || "unknown")}<br>Camera-facing estimate: ${frame.looking_at_camera ? "Yes" : "No"}`;
+      if (overlayLabels.innerHTML !== labels) overlayLabels.innerHTML = labels;
+      // Attach above the face border, or inside its top edge near the video boundary.
+      faceOverlay.dataset.labelInside = "false";
+      faceOverlay.dataset.labelInside = String(y < overlayLabels.offsetHeight);
     } else {
-      overlayLabels.textContent = "No face detected at this moment";
+      faceOverlay.hidden = true;
     }
-    requestAnimationFrame(draw);
+    animationId = requestAnimationFrame(draw);
   };
-  replayVideo.addEventListener("loadedmetadata", draw);
+  const start = () => {
+    cancelAnimationFrame(animationId);
+    draw();
+  };
+  replayVideo.addEventListener("loadedmetadata", start);
+  if (replayVideo.readyState >= 1) start();
+  window.addEventListener("pagehide", () => cancelAnimationFrame(animationId), { once: true });
 }
 
 saveBtn.addEventListener("click", async () => {
   saveBtn.disabled = true;
   try {
-    await api(`/api/interviews/${interviewId}/save`, { method: "POST" });
-    saveStatus.textContent = "Interview saved.";
+    const saved = await api(`/api/interviews/${interviewId}/save`, { method: "POST" });
+    saveStatus.textContent = `Interview and all ${saved.question_bank_count} questions saved.`;
+    saveBtn.textContent = "Saved";
   } catch (err) {
     saveStatus.textContent = err.message;
     saveBtn.disabled = false;
@@ -160,6 +166,14 @@ async function init() {
     return;
   }
   const payload = await api(`/api/interviews/${interviewId}/results`);
+  const retakeBtn = document.getElementById("retakeBtn");
+  retakeBtn.href = `/settings?retakeId=${encodeURIComponent(interviewId)}`;
+  retakeBtn.hidden = false;
+  if (payload.interview.saved) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saved";
+    saveStatus.textContent = "This interview and its full question bank are saved.";
+  }
   analysis = payload.analysis;
   const warnings = document.getElementById("analysisWarnings");
   warnings.textContent = (analysis.warnings || []).join(" ");

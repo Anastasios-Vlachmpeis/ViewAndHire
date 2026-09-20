@@ -41,7 +41,9 @@ Open http://127.0.0.1:8000
 2. **Settings** — timers, question selection, recording mode
 3. **Session** — prep/answer timers, continuous recording
 4. **Results** — scores, replay with face box, save interview
-5. **History** — reopen saved sessions
+5. **History** — reopen saved sessions or retake with the same or different questions from their full saved bank
+
+Saving an interview retains its entire generated and custom question bank, including questions not used in that attempt. Choose **Retake** in History or **Retake interview** on Results to select questions and adjust timers. Previous questions and settings are restored by default. Every retake creates a separate recording and result; the original attempt stays intact.
 
 ## Privacy
 
