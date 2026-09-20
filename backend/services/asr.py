@@ -1,12 +1,14 @@
-import json
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from faster_whisper import WhisperModel
 
 from backend.config import settings
+from backend.services.json_io import write_json
 
 _model: WhisperModel | None = None
+_model_lock = Lock()
 
 
 def _get_model() -> WhisperModel:
@@ -17,6 +19,12 @@ def _get_model() -> WhisperModel:
 
 
 def transcribe_audio(wav_path: Path) -> dict[str, Any]:
+    # Whisper returns a lazy generator; protect loading and its consumption.
+    with _model_lock:
+        return _transcribe_audio(wav_path)
+
+
+def _transcribe_audio(wav_path: Path) -> dict[str, Any]:
     model = _get_model()
     segments, info = model.transcribe(str(wav_path), word_timestamps=True, vad_filter=True)
     segment_list = []
@@ -26,13 +34,13 @@ def transcribe_audio(wav_path: Path) -> dict[str, Any]:
         seg_words = []
         if seg.words:
             for w in seg.words:
-                word = {"word": w.word.strip(), "start": w.start, "end": w.end}
+                word = {"word": w.word.strip(), "start": float(w.start), "end": float(w.end)}
                 words.append(word)
                 seg_words.append(word)
         segment_list.append(
             {
-                "start": seg.start,
-                "end": seg.end,
+                "start": float(seg.start),
+                "end": float(seg.end),
                 "text": seg.text.strip(),
                 "words": seg_words,
             }
@@ -41,7 +49,7 @@ def transcribe_audio(wav_path: Path) -> dict[str, Any]:
             full_text_parts.append(seg.text.strip())
     result = {
         "language": info.language,
-        "duration": info.duration,
+        "duration": float(info.duration),
         "text": " ".join(full_text_parts),
         "segments": segment_list,
         "words": words,
@@ -51,20 +59,22 @@ def transcribe_audio(wav_path: Path) -> dict[str, Any]:
 
 def save_transcript(interview_dir: Path, transcript: dict[str, Any]) -> Path:
     path = interview_dir / "transcript.json"
-    path.write_text(json.dumps(transcript, indent=2, default=lambda v: v.item() if hasattr(v, "item") else str(v)), encoding="utf-8")
+    write_json(path, transcript)
     return path
 
 
 def slice_transcript(transcript: dict[str, Any], start: float, end: float) -> str:
+    if end <= start:
+        return ""
     words = [
         w["word"]
         for w in transcript.get("words", [])
-        if w["end"] >= start and w["start"] <= end
+        if start <= (w["start"] + w["end"]) / 2 < end
     ]
-    if words:
+    if transcript.get("words"):
         return " ".join(words)
     parts = []
     for seg in transcript.get("segments", []):
-        if seg["end"] >= start and seg["start"] <= end:
+        if seg["end"] > start and seg["start"] < end:
             parts.append(seg["text"])
     return " ".join(parts).strip()

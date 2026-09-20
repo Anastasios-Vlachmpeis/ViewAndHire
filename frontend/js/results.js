@@ -132,7 +132,7 @@ function setupOverlay() {
       ctx.strokeRect(x, y, w, h);
       overlayLabels.innerHTML = `
         Expression: ${frame.expression || "unknown"}<br>
-        Looking at camera: ${frame.looking_at_camera ? "Yes" : "No"}<br>
+        Camera-facing estimate: ${frame.looking_at_camera ? "Yes" : "No"}<br>
         Time: ${replayVideo.currentTime.toFixed(1)}s
       `;
     } else {
@@ -161,6 +161,9 @@ async function init() {
   }
   const payload = await api(`/api/interviews/${interviewId}/results`);
   analysis = payload.analysis;
+  const warnings = document.getElementById("analysisWarnings");
+  warnings.textContent = (analysis.warnings || []).join(" ");
+  warnings.hidden = !warnings.textContent;
   faceFrames = analysis.face_frames || [];
   renderAggregate(analysis.aggregate);
   renderWeakPoints(analysis.weak_points || []);

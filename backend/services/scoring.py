@@ -1,6 +1,4 @@
-import json
-import shutil
-import subprocess
+import math
 import wave
 from pathlib import Path
 from typing import Any, Callable
@@ -10,6 +8,7 @@ import numpy as np
 
 from backend.config import settings
 from backend.services import asr, face, llm, voice
+from backend.services.json_io import dumps, write_json
 
 ProgressCallback = Callable[[str, int, str], None]
 
@@ -18,22 +17,6 @@ AGGREGATE_WEIGHTS = {
     "speech_delivery": 0.35,
     "face_gaze": 0.25,
 }
-
-
-def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
-    return max(low, min(high, value))
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
-
-
-def dumps(payload: Any) -> str:
-    return json.dumps(payload, indent=2, default=_json_default)
 
 
 def _write_pcm_wav(path: Path, samples: np.ndarray, sample_rate: int = 16000) -> None:
@@ -47,83 +30,58 @@ def _write_pcm_wav(path: Path, samples: np.ndarray, sample_rate: int = 16000) ->
 
 
 def _decode_audio_with_av(source_path: Path, start: float = 0.0, duration: float | None = None) -> tuple[np.ndarray, int]:
-    container = av.open(str(source_path))
-    stream = next((s for s in container.streams if s.type == "audio"), None)
-    if stream is None:
-        container.close()
-        return np.zeros(0, dtype=np.float32), 16000
-
-    resampler = av.audio.resampler.AudioResampler(format="flt", layout="mono", rate=16000)
+    sample_rate = 16000
     chunks: list[np.ndarray] = []
-    end_time = None if duration is None else start + duration
+    cursor = 0
+    with av.open(str(source_path)) as container:
+        if not container.streams.audio:
+            raise ValueError("Recording has no audio track")
+        origin = float(container.start_time or 0) / av.time_base
+        resampler = av.audio.resampler.AudioResampler(format="flt", layout="mono", rate=sample_rate)
 
-    for frame in container.decode(audio=0):
-        if frame.time is not None and frame.time < start:
-            continue
-        if end_time is not None and frame.time is not None and frame.time >= end_time:
-            break
-        for converted in resampler.resample(frame):
-            arr = converted.to_ndarray()
-            if arr.ndim == 2:
-                arr = arr[0]
-            chunks.append(arr.astype(np.float32))
+        def append_frame(converted: av.AudioFrame) -> None:
+            nonlocal cursor
+            values = converted.to_ndarray().reshape(-1).astype(np.float32)
+            position = round((float(converted.time) - origin) * sample_rate) if converted.time is not None else cursor
+            # Preserve silence/gaps so audio and video use the same recording timeline.
+            if position > cursor:
+                chunks.append(np.zeros(position - cursor, dtype=np.float32))
+                cursor = position
+            overlap = max(0, cursor - position)
+            values = values[overlap:]
+            chunks.append(values)
+            cursor += len(values)
 
-    container.close()
+        for frame in container.decode(audio=0):
+            for converted in resampler.resample(frame):
+                append_frame(converted)
+        for converted in resampler.resample(None):
+            append_frame(converted)
     if not chunks:
-        return np.zeros(0, dtype=np.float32), 16000
-    return np.concatenate(chunks), 16000
+        raise ValueError("Recording contains no decodable audio samples")
+    samples = np.concatenate(chunks)
+    first = max(0, round(start * sample_rate))
+    last = len(samples) if duration is None else first + max(0, round(duration * sample_rate))
+    return samples[first:last], sample_rate
 
 
 def extract_wav(source_path: Path, wav_path: Path) -> None:
-    if shutil.which("ffmpeg"):
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(source_path),
-            "-vn",
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            str(wav_path),
-        ]
-        subprocess.run(cmd, check=True, capture_output=True)
-        return
+    # Use one decoder on every machine, including exact timestamps and resampler flush.
     samples, sample_rate = _decode_audio_with_av(source_path)
+    if not samples.size:
+        raise ValueError("Recording contains no audio samples")
     _write_pcm_wav(wav_path, samples, sample_rate)
 
 
 def extract_segment_wav(full_wav: Path, start: float, end: float, out_path: Path) -> None:
-    duration = max(end - start, 0.1)
-    if shutil.which("ffmpeg"):
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-ss",
-            str(start),
-            "-t",
-            str(duration),
-            "-i",
-            str(full_wav),
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            str(out_path),
-        ]
-        subprocess.run(cmd, check=True, capture_output=True)
-        return
+    if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end < start:
+        raise ValueError("Invalid audio segment boundaries")
     with wave.open(str(full_wav), "rb") as wav_file:
         sample_rate = wav_file.getframerate()
-        start_frame = int(start * sample_rate)
-        end_frame = int(end * sample_rate)
-        wav_file.setpos(max(0, start_frame))
-        frames = wav_file.readframes(max(end_frame - start_frame, 1))
+        start_frame = min(round(start * sample_rate), wav_file.getnframes())
+        end_frame = min(round(end * sample_rate), wav_file.getnframes())
+        wav_file.setpos(start_frame)
+        frames = wav_file.readframes(end_frame - start_frame)
     segment_path = out_path
     with wave.open(str(segment_path), "wb") as out_wav:
         with wave.open(str(full_wav), "rb") as src:
@@ -131,6 +89,43 @@ def extract_segment_wav(full_wav: Path, start: float, end: float, out_path: Path
             out_wav.setsampwidth(src.getsampwidth())
             out_wav.setframerate(src.getframerate())
             out_wav.writeframes(frames)
+
+
+def normalize_timestamps(timestamps: list[dict[str, Any]], questions: list[dict[str, Any]],
+                         duration: float) -> tuple[list[dict[str, Any]], list[str]]:
+    """Recover the legacy stop-button bug, then validate against actual media duration."""
+    from backend.models import QuestionTimestamp
+
+    if not isinstance(timestamps, list):
+        raise ValueError("Timestamps must be a list")
+    ids = {q["id"]: i for i, q in enumerate(questions)}
+    normalized, warnings, seen = [], [], set()
+    previous_end = 0.0
+    for index, raw in enumerate(timestamps):
+        ts = QuestionTimestamp.model_validate(raw).model_dump()
+        qid = ts["question_id"]
+        if qid not in ids or qid in seen or ts["question_index"] != ids[qid]:
+            raise ValueError("Timestamps contain an unknown, duplicate or misplaced question")
+        seen.add(qid)
+        start, end = ts["answer_start"], ts["answer_end"]
+        if start > 0 and end == 0:
+            if index != len(timestamps) - 1:
+                raise ValueError("Only the last unfinished answer can be recovered")
+            end = duration
+            warnings.append(f"Recovered the missing end time for {qid} from recording duration.")
+        if start == end == 0:
+            # Legacy recordings stopped during preparation have no answer.
+            start = end = min(ts["prep_start"], duration)
+        if ts["prep_start"] > start or end < start or start < previous_end:
+            raise ValueError("Answer timestamps must be ordered and non-overlapping")
+        if start > duration + 0.5 or end > duration + 0.5:
+            raise ValueError("Answer timestamps exceed the recording duration")
+        ts.update(answer_start=min(start, duration), answer_end=min(end, duration))
+        previous_end = ts["answer_end"]
+        normalized.append(ts)
+    if not normalized:
+        raise ValueError("No question timestamps were recorded")
+    return normalized, warnings
 
 
 def compute_weak_points(per_question: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -202,10 +197,7 @@ def run_analysis(
         if progress:
             progress(stage, percent, message)
         status_path = interview_dir / "progress.json"
-        status_path.write_text(
-            dumps({"stage": stage, "percent": percent, "message": message}),
-            encoding="utf-8",
-        )
+        write_json(status_path, {"stage": stage, "percent": percent, "message": message})
 
     report("extract", 5, "Extracting audio...")
     recording = interview_dir / "recording.webm"
@@ -213,6 +205,9 @@ def run_analysis(
     if not recording.exists():
         raise FileNotFoundError("Recording not found")
     extract_wav(recording, wav_path)
+    with wave.open(str(wav_path), "rb") as wav_file:
+        duration = wav_file.getnframes() / wav_file.getframerate()
+    timestamps, warnings = normalize_timestamps(timestamps, selected_questions, duration)
 
     report("transcribe", 20, "Transcribing with local Whisper...")
     transcript = asr.transcribe_audio(wav_path)
@@ -236,26 +231,19 @@ def run_analysis(
         report("score", pct, f"Scoring question {idx + 1} of {total}...")
 
         segment_wav = interview_dir / f"segment_{idx}.wav"
-        extract_segment_wav(wav_path, start, end, segment_wav)
         q_transcript = asr.slice_transcript(transcript, start, end)
 
         speech = {"score": None, "features": {}, "notes": "Skipped"}
-        if record_mode in {"both", "mic", "camera"}:
+        if end - start < 0.1:
+            speech = {"score": None, "features": {}, "notes": "Answer skipped or too short to measure."}
+        elif record_mode in {"both", "mic", "camera"}:
+            extract_segment_wav(wav_path, start, end, segment_wav)
             speech = voice.analyze_audio_segment(str(segment_wav), q_transcript)
 
         answer_quality = llm.score_answer(question["question"], question.get("scoring_hints", ""), q_transcript)
 
-        q_face_frames = [f for f in face_result["frames"] if start <= f["time"] <= end]
-        q_detected = [f for f in q_face_frames if f["face_detected"]]
-        q_looking = [f for f in q_detected if f["looking_at_camera"]]
-        face_visible = len(q_detected) / len(q_face_frames) if q_face_frames else 0.0
-        looking_ratio = len(q_looking) / len(q_detected) if q_detected else 0.0
-        negative = sum(1 for f in q_detected if f["expression"] in {"fearful", "sad", "angry", "disgust"})
-        positive = sum(1 for f in q_detected if f["expression"] in {"happy", "neutral", "surprised"})
-        expression_balance = positive / len(q_detected) if q_detected else 0.0
-        face_score = None
-        if record_mode in {"both", "camera"} and q_face_frames:
-            face_score = _clamp(face_visible * 30 + looking_ratio * 45 + expression_balance * 25 - (negative / max(len(q_detected), 1)) * 15)
+        q_face_frames = [f for f in face_result["frames"] if start <= f["time"] < end]
+        face_summary = face.summarize_frames(q_face_frames)
 
         per_question.append(
             {
@@ -272,12 +260,7 @@ def run_analysis(
                     "notes": answer_quality.get("notes", ""),
                 },
                 "speech_delivery": speech,
-                "face_gaze": {
-                    "score": round(face_score, 1) if face_score is not None else None,
-                    "face_visible_ratio": round(face_visible, 3),
-                    "looking_ratio": round(looking_ratio, 3),
-                    "expression_balance": round(expression_balance, 3),
-                },
+                "face_gaze": face_summary,
             }
         )
 
@@ -296,8 +279,9 @@ def run_analysis(
         "aggregate": aggregate,
         "weak_points": weak_points,
         "overview": overview,
+        "warnings": warnings,
     }
     analysis_path = interview_dir / "analysis.json"
-    analysis_path.write_text(dumps(analysis), encoding="utf-8")
+    write_json(analysis_path, analysis)
     report("done", 100, "Analysis complete")
     return analysis

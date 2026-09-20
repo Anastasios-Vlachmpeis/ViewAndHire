@@ -5,12 +5,14 @@ from typing import Any
 from openai import OpenAI
 
 from backend.config import settings
+from backend.models import AnswerScore, QuestionItem
+from backend.services.json_io import dumps
 
 
 def _client() -> OpenAI:
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not set. Add it to your .env file.")
-    return OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+    return OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url, timeout=120.0)
 
 
 def _extract_json(text: str) -> Any:
@@ -34,7 +36,9 @@ def _complete(messages: list[dict[str, str]], json_mode: bool = False) -> str:
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
     response = _client().chat.completions.create(**kwargs)
-    return response.choices[0].message.content or ""
+    if not response.choices or not response.choices[0].message.content:
+        raise ValueError("The feedback service returned an empty response. Please retry analysis.")
+    return response.choices[0].message.content
 
 
 def generate_questions(job_text: str, company: str | None, role_title: str | None) -> list[dict[str, Any]]:
@@ -65,10 +69,15 @@ Return a JSON object with a "questions" array. Each item:
     )
     parsed = _extract_json(content or "{}")
     questions = parsed.get("questions", parsed) if isinstance(parsed, dict) else parsed
-    if not isinstance(questions, list):
+    if not isinstance(questions, list) or not questions:
         raise ValueError("LLM did not return a question list")
     for idx, q in enumerate(questions, start=1):
+        if not isinstance(q, dict):
+            raise ValueError("LLM returned an invalid question")
         q.setdefault("id", f"q{idx}")
+    questions = [QuestionItem.model_validate(q).model_dump() for q in questions]
+    if len({q["id"] for q in questions}) != len(questions):
+        raise ValueError("LLM returned duplicate question IDs")
     return questions
 
 
@@ -77,6 +86,9 @@ def score_answer(
     scoring_hints: str,
     transcript: str,
 ) -> dict[str, Any]:
+    if not transcript.strip():
+        return {"adequacy": 0.0, "specificity": 0.0, "structure": 0.0,
+                "ambiguity_penalty": 0.0, "overall": 0.0, "notes": "No answer was recorded."}
     prompt = f"""Score this mock interview answer from transcript only.
 
 Question: {question}
@@ -100,7 +112,7 @@ Return JSON only:
         ],
         json_mode=True,
     )
-    return _extract_json(content or "{}")
+    return AnswerScore.model_validate(_extract_json(content)).model_dump()
 
 
 def generate_overview(
@@ -120,7 +132,7 @@ Job context (truncated):
 {job_text[:1500]}
 
 Metrics JSON:
-{json.dumps(payload, indent=2, default=str)}
+{dumps(payload)}
 
 Cover: overall impression, top strengths, top weak points to practice, and 3 concrete next steps.
 Do not diagnose medical conditions. Use phrasing like "delivery signals" not clinical labels.

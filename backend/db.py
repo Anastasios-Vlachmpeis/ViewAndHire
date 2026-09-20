@@ -162,6 +162,17 @@ def update_interview_status(interview_id: str, status: str) -> None:
         )
 
 
+def claim_analysis(interview_id: str) -> bool:
+    """Atomically prevent uploads/retries from writing over an active job."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE interviews SET status = 'uploaded', updated_at = ? "
+            "WHERE id = ? AND status NOT IN ('uploaded', 'analyzing')",
+            (_utc_now(), interview_id),
+        )
+        return cursor.rowcount == 1
+
+
 def mark_interview_saved(interview_id: str) -> None:
     with get_connection() as conn:
         conn.execute(

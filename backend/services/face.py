@@ -1,8 +1,11 @@
+import math
 import urllib.request
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import cv2
+import av
 import mediapipe as mp
 import numpy as np
 from mediapipe.tasks import python
@@ -14,42 +17,33 @@ FER_MODEL_URL = (
     "https://github.com/opencv/opencv_zoo/raw/main/models/"
     "facial_expression_recognition/facial_expression_recognition_mobilefacenet_2022july.onnx"
 )
-YUNET_MODEL_URL = (
-    "https://github.com/opencv/opencv_zoo/raw/main/models/"
-    "face_detection_yunet/face_detection_yunet_2023mar.onnx"
-)
 
 EXPRESSION_LABELS = ["angry", "disgust", "fearful", "happy", "neutral", "sad", "surprised"]
 
-_landmarker: vision.FaceLandmarker | None = None
-_fer_net: cv2.dnn.Net | None = None
-_yunet: cv2.FaceDetectorYN | None = None
+_weights_lock = Lock()
 
 
-def _ensure_weights() -> tuple[Path, Path]:
-    settings.weights_dir.mkdir(parents=True, exist_ok=True)
-    fer_path = settings.weights_dir / "fer_mobilefacenet.onnx"
-    yunet_path = settings.weights_dir / "yunet.onnx"
-    if not fer_path.exists():
-        urllib.request.urlretrieve(FER_MODEL_URL, fer_path)
-    if not yunet_path.exists():
-        urllib.request.urlretrieve(YUNET_MODEL_URL, yunet_path)
-    return fer_path, yunet_path
+def _download_weight(url: str, target: Path) -> Path:
+    with _weights_lock:
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_suffix(target.suffix + ".download")
+            try:
+                urllib.request.urlretrieve(url, temporary)
+                temporary.replace(target)
+            finally:
+                temporary.unlink(missing_ok=True)
+    return target
 
 
 def _get_landmarker() -> vision.FaceLandmarker:
-    global _landmarker
-    if _landmarker is None:
-        base_options = python.BaseOptions(model_asset_path=_landmarker_model_path())
-        options = vision.FaceLandmarkerOptions(
-            base_options=base_options,
-            output_face_blendshapes=False,
-            output_facial_transformation_matrixes=True,
-            num_faces=1,
-            running_mode=vision.RunningMode.VIDEO,
-        )
-        _landmarker = vision.FaceLandmarker.create_from_options(options)
-    return _landmarker
+    # VIDEO trackers retain timestamps and tracking state. Never reuse across clips.
+    options = vision.FaceLandmarkerOptions(
+        base_options=python.BaseOptions(model_asset_path=_landmarker_model_path()),
+        num_faces=1,
+        running_mode=vision.RunningMode.VIDEO,
+    )
+    return vision.FaceLandmarker.create_from_options(options)
 
 
 def _landmarker_model_path() -> str:
@@ -62,25 +56,14 @@ def _landmarker_model_path() -> str:
             "https://storage.googleapis.com/mediapipe-models/face_landmarker/"
             "face_landmarker/float16/1/face_landmarker.task"
         )
-        settings.weights_dir.mkdir(parents=True, exist_ok=True)
-        urllib.request.urlretrieve(url, target)
+        _download_weight(url, target)
     return str(target)
 
 
 def _get_fer() -> cv2.dnn.Net:
-    global _fer_net
-    if _fer_net is None:
-        fer_path, _ = _ensure_weights()
-        _fer_net = cv2.dnn.readNet(str(fer_path))
-    return _fer_net
-
-
-def _get_yunet() -> cv2.FaceDetectorYN:
-    global _yunet
-    if _yunet is None:
-        _, yunet_path = _ensure_weights()
-        _yunet = cv2.FaceDetectorYN.create(str(yunet_path), "", (320, 320), 0.6, 0.3, 5000)
-    return _yunet
+    path = _download_weight(FER_MODEL_URL, settings.weights_dir / "fer_mobilefacenet.onnx")
+    # setInput/forward mutate the network, so use one network per analysis.
+    return cv2.dnn.readNet(str(path))
 
 
 def _bbox_from_landmarks(landmarks: list, width: int, height: int) -> dict[str, float]:
@@ -90,97 +73,106 @@ def _bbox_from_landmarks(landmarks: list, width: int, height: int) -> dict[str, 
     y_min, y_max = min(ys), max(ys)
     pad_x = (x_max - x_min) * 0.08
     pad_y = (y_max - y_min) * 0.08
-    return {
-        "x": float(max(0.0, x_min - pad_x)),
-        "y": float(max(0.0, y_min - pad_y)),
-        "w": float(min(width, x_max + pad_x) - max(0.0, x_min - pad_x)),
-        "h": float(min(height, y_max + pad_y) - max(0.0, y_min - pad_y)),
-    }
+    x0, x1 = np.clip([x_min - pad_x, x_max + pad_x], 0, width)
+    y0, y1 = np.clip([y_min - pad_y, y_max + pad_y], 0, height)
+    return {"x": float(x0), "y": float(y0), "w": float(x1 - x0), "h": float(y1 - y0)}
 
 
 def _looking_at_camera(landmarks: list, width: int, height: int) -> bool:
+    """Camera-facing proxy, measured relative to face size, not image size."""
     if len(landmarks) < 478:
         return False
-    left_iris = np.mean([(landmarks[i].x, landmarks[i].y) for i in (468, 469, 470, 471, 472)], axis=0)
-    right_iris = np.mean([(landmarks[i].x, landmarks[i].y) for i in (473, 474, 475, 476, 477)], axis=0)
-    left_eye = np.mean([(landmarks[i].x, landmarks[i].y) for i in (33, 133, 160, 159, 158, 157, 173)], axis=0)
-    right_eye = np.mean([(landmarks[i].x, landmarks[i].y) for i in (362, 263, 387, 386, 385, 384, 398)], axis=0)
-    nose = (landmarks[1].x, landmarks[1].y)
+    points = np.array([(lm.x * width, lm.y * height) for lm in landmarks])
+    eyes = [(points[33] + points[133]) / 2, (points[362] + points[263]) / 2]
+    axis = eyes[1] - eyes[0]
+    eye_spacing = np.linalg.norm(axis)
+    if eye_spacing < 1e-6:
+        return False
+    axis /= eye_spacing
+    vertical = np.array([-axis[1], axis[0]])
+    for center, corners, iris_ids in zip(eyes, [(33, 133), (362, 263)], [range(468, 473), range(473, 478)]):
+        eye_width = np.linalg.norm(points[corners[1]] - points[corners[0]])
+        if eye_width < 1e-6:
+            return False
+        iris = points[list(iris_ids)].mean(axis=0)
+        if abs(np.dot(iris - center, axis)) / eye_width >= 0.22:
+            return False
+    nose_offset = points[1] - (eyes[0] + eyes[1]) / 2
+    yaw_proxy = abs(np.dot(nose_offset, axis)) / eye_spacing
+    pitch_proxy = np.dot(nose_offset, vertical) / eye_spacing
+    return bool(yaw_proxy < 0.35 and 0.15 < pitch_proxy < 0.95)
 
-    left_offset = abs(left_iris[0] - left_eye[0])
-    right_offset = abs(right_iris[0] - right_eye[0])
-    yaw_proxy = abs((left_eye[0] + right_eye[0]) / 2 - nose[0])
-    pitch_proxy = abs(nose[1] - (left_eye[1] + right_eye[1]) / 2)
 
-    return bool(left_offset < 0.018 and right_offset < 0.018 and yaw_proxy < 0.03 and pitch_proxy < 0.04)
-
-
-def _predict_expression(frame: np.ndarray, bbox: dict[str, float]) -> tuple[str, float]:
-    x, y, w, h = int(bbox["x"]), int(bbox["y"]), int(bbox["w"]), int(bbox["h"])
-    x = max(0, x)
-    y = max(0, y)
-    crop = frame[y : y + int(h), x : x + int(w)]
-    if crop.size == 0:
-        return "neutral", 0.0
-    blob = cv2.dnn.blobFromImage(crop, 1.0 / 255.0, (112, 112), (0, 0, 0), swapRB=True)
-    net = _get_fer()
+def _predict_expression(frame: np.ndarray, landmarks: list, net: cv2.dnn.Net) -> tuple[str | None, float]:
+    height, width = frame.shape[:2]
+    points = np.array([(lm.x * width, lm.y * height) for lm in landmarks], dtype=np.float32)
+    # Align eyes, nose and mouth to the model's five-point face template.
+    source = np.array([(points[33] + points[133]) / 2, (points[362] + points[263]) / 2,
+                       points[1], points[61], points[291]], dtype=np.float32)
+    target = np.array([[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366],
+                       [41.5493, 92.3655], [70.7299, 92.2041]], dtype=np.float32)
+    transform, _ = cv2.estimateAffinePartial2D(source, target, method=cv2.LMEDS)
+    if transform is None or not np.isfinite(transform).all():
+        return None, 0.0
+    aligned = cv2.warpAffine(frame, transform, (112, 112))
+    blob = cv2.dnn.blobFromImage(aligned, 1.0 / 127.5, (112, 112), (127.5, 127.5, 127.5), swapRB=True)
     net.setInput(blob)
-    scores = net.forward()[0]
+    scores = net.forward().reshape(-1)
+    if len(scores) != len(EXPRESSION_LABELS) or not np.isfinite(scores).all():
+        raise ValueError("Expression model returned invalid scores")
+    # The network emits logits, not calibrated probabilities.
+    probabilities = np.exp(scores - scores.max())
+    probabilities /= probabilities.sum()
     idx = int(np.argmax(scores))
-    return EXPRESSION_LABELS[idx], float(scores[idx])
+    return EXPRESSION_LABELS[idx], float(probabilities[idx])
 
 
 def analyze_video(video_path: Path, sample_fps: float = 5.0) -> dict[str, Any]:
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        return {"frames": [], "summary": {"score": 0.0, "face_visible_ratio": 0.0, "looking_ratio": 0.0}}
-
-    native_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    step = max(int(round(native_fps / sample_fps)), 1)
-    landmarker = _get_landmarker()
+    if not math.isfinite(sample_fps) or sample_fps <= 0:
+        raise ValueError("sample_fps must be positive and finite")
     frames: list[dict[str, Any]] = []
-    frame_idx = 0
-    sampled = 0
+    with av.open(str(video_path)) as container:
+        if not container.streams.video:
+            raise ValueError("Recording has no video track")
+        stream = container.streams.video[0]
+        native_fps = float(stream.average_rate or 30)
+        if not math.isfinite(native_fps) or native_fps <= 0:
+            native_fps = 30.0
+        origin = float(container.start_time or 0) / av.time_base
+        last_time, last_ms, next_sample = -1.0, -1, 0.0
+        with _get_landmarker() as landmarker:
+            net = None
+            for index, decoded in enumerate(container.decode(video=0)):
+                time = float(decoded.time) - origin if decoded.time is not None else index / native_fps
+                if not math.isfinite(time) or time < 0 or time <= last_time:
+                    time = max(0.0, last_time + 1.0 / native_fps)
+                last_time = time
+                if time < next_sample:
+                    continue
+                next_sample = time + 1.0 / sample_fps
+                timestamp_ms = max(last_ms + 1, int(round(time * 1000)))
+                last_ms = timestamp_ms
+                frame = decoded.to_ndarray(format="bgr24")
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                result = landmarker.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp_ms)
+                height, width = frame.shape[:2]
+                entry = {"time": round(time, 3), "face_detected": False, "bbox": None,
+                         "expression": None, "expression_confidence": 0.0, "looking_at_camera": False}
+                if result.face_landmarks:
+                    landmarks = result.face_landmarks[0]
+                    if net is None:
+                        net = _get_fer()
+                    expression, confidence = _predict_expression(frame, landmarks, net)
+                    entry.update(face_detected=True, bbox=_bbox_from_landmarks(landmarks, width, height),
+                                 expression=expression, expression_confidence=round(confidence, 3),
+                                 looking_at_camera=_looking_at_camera(landmarks, width, height))
+                frames.append(entry)
+    if not frames:
+        raise ValueError("Recording contains no decodable video frames")
+    return {"frames": frames, "summary": summarize_frames(frames)}
 
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        if frame_idx % step != 0:
-            frame_idx += 1
-            continue
-        timestamp_ms = int((frame_idx / native_fps) * 1000)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        result = landmarker.detect_for_video(mp_image, timestamp_ms)
-        height, width = frame.shape[:2]
-        entry: dict[str, Any] = {
-            "time": round(frame_idx / native_fps, 3),
-            "face_detected": False,
-            "bbox": None,
-            "expression": None,
-            "expression_confidence": 0.0,
-            "looking_at_camera": False,
-        }
-        if result.face_landmarks:
-            landmarks = result.face_landmarks[0]
-            bbox = _bbox_from_landmarks(landmarks, width, height)
-            expression, confidence = _predict_expression(frame, bbox)
-            entry.update(
-                {
-                    "face_detected": True,
-                    "bbox": bbox,
-                    "expression": expression,
-                    "expression_confidence": round(confidence, 3),
-                    "looking_at_camera": bool(_looking_at_camera(landmarks, width, height)),
-                }
-            )
-        frames.append(entry)
-        sampled += 1
-        frame_idx += 1
 
-    cap.release()
-
+def summarize_frames(frames: list[dict[str, Any]]) -> dict[str, Any]:
     detected = [f for f in frames if f["face_detected"]]
     looking = [f for f in detected if f["looking_at_camera"]]
     face_visible_ratio = len(detected) / len(frames) if frames else 0.0
@@ -199,12 +191,10 @@ def analyze_video(video_path: Path, sample_fps: float = 5.0) -> dict[str, Any]:
     score = max(0.0, min(100.0, score - negative_ratio * 15))
 
     return {
-        "frames": frames,
-        "summary": {
-            "score": round(score, 1),
-            "face_visible_ratio": round(face_visible_ratio, 3),
-            "looking_ratio": round(looking_ratio, 3),
-            "expression_balance": round(expression_balance, 3),
-            "sample_count": sampled,
-        },
+        "score": round(score, 1) if frames else None,
+        "face_visible_ratio": round(face_visible_ratio, 3),
+        "looking_ratio": round(looking_ratio, 3),
+        "expression_balance": round(expression_balance, 3),
+        "sample_count": len(frames),
+        "notes": "Camera-facing and expression estimates are uncalibrated visual proxies.",
     }

@@ -1,4 +1,6 @@
 import re
+import math
+import wave
 from typing import Any
 
 import parselmouth
@@ -13,6 +15,8 @@ def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
 
 
 def _score_from_range(value: float, ideal_low: float, ideal_high: float, penalty_scale: float = 1.0) -> float:
+    if not math.isfinite(value):
+        return 0.0
     if ideal_low <= value <= ideal_high:
         return 100.0
     if value < ideal_low:
@@ -23,19 +27,27 @@ def _score_from_range(value: float, ideal_low: float, ideal_high: float, penalty
 
 
 def analyze_audio_segment(wav_path: str, transcript_text: str = "") -> dict[str, Any]:
+    with wave.open(wav_path, "rb") as audio:
+        if audio.getnframes() == 0:
+            return {"duration": 0.0, "score": 0.0, "features": {}, "pauses": [],
+                    "notes": "No audio samples were recorded."}
     sound = parselmouth.Sound(wav_path)
     duration = sound.get_total_duration()
-    if duration <= 0.05:
+    if duration < 0.1 or not sound.values.size or float(abs(sound.values).max()) < 1e-5:
         return {
             "duration": duration,
             "score": 0.0,
             "features": {},
-            "notes": "No audible speech detected.",
+            "pauses": [],
+            "notes": "Audio is silent or too short to measure speech reliably.",
         }
 
     pitch = call(sound, "To Pitch", 0.0, 75, 600)
     mean_f0 = call(pitch, "Get mean", 0, 0, "Hertz")
     stdev_f0 = call(pitch, "Get standard deviation", 0, 0, "Hertz")
+    if not math.isfinite(mean_f0):
+        return {"duration": float(duration), "score": 0.0, "features": {}, "pauses": [],
+                "notes": "No voiced speech detected; delivery could not be measured."}
 
     intensity = call(sound, "To Intensity", 75, 0.0, "yes")
     mean_intensity = call(intensity, "Get mean", 0, 0, "energy")
@@ -96,13 +108,13 @@ def analyze_audio_segment(wav_path: str, transcript_text: str = "") -> dict[str,
 
     features = {
         "duration": round(float(duration), 3),
-        "mean_f0": round(float(mean_f0) if mean_f0 == mean_f0 else 0.0, 2),
-        "f0_stdev": round(float(stdev_f0) if stdev_f0 == stdev_f0 else 0.0, 2),
-        "mean_intensity": round(float(mean_intensity) if mean_intensity == mean_intensity else 0.0, 2),
-        "intensity_stdev": round(float(stdev_intensity) if stdev_intensity == stdev_intensity else 0.0, 2),
-        "hnr": round(float(hnr) if hnr == hnr else 0.0, 2),
-        "local_jitter": round(float(local_jitter) if local_jitter == local_jitter else 0.0, 5),
-        "local_shimmer": round(float(local_shimmer) if local_shimmer == local_shimmer else 0.0, 5),
+        "mean_f0": round(float(mean_f0), 2),
+        "f0_stdev": round(float(stdev_f0), 2) if math.isfinite(stdev_f0) else None,
+        "mean_intensity": round(float(mean_intensity), 2) if math.isfinite(mean_intensity) else None,
+        "intensity_stdev": round(float(stdev_intensity), 2) if math.isfinite(stdev_intensity) else None,
+        "hnr": round(float(hnr), 2) if math.isfinite(hnr) else None,
+        "local_jitter": round(float(local_jitter), 5) if math.isfinite(local_jitter) else None,
+        "local_shimmer": round(float(local_shimmer), 5) if math.isfinite(local_shimmer) else None,
         "pause_count": pause_count,
         "pause_ratio": round(pause_ratio, 3),
         "mean_pause_duration": round(mean_pause, 3),

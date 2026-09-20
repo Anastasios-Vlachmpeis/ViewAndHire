@@ -35,10 +35,19 @@ class InterviewCreate(BaseModel):
 
 class QuestionTimestamp(BaseModel):
     question_id: str
-    question_index: int
-    prep_start: float
-    answer_start: float
-    answer_end: float
+    question_index: int = Field(ge=0)
+    prep_start: float = Field(ge=0, allow_inf_nan=False)
+    answer_start: float = Field(ge=0, allow_inf_nan=False)
+    answer_end: float = Field(ge=0, allow_inf_nan=False)
+
+
+class AnswerScore(BaseModel):
+    adequacy: float = Field(ge=0, le=100, allow_inf_nan=False)
+    specificity: float = Field(ge=0, le=100, allow_inf_nan=False)
+    structure: float = Field(ge=0, le=100, allow_inf_nan=False)
+    ambiguity_penalty: float = Field(ge=0, le=100, allow_inf_nan=False)
+    overall: float = Field(ge=0, le=100, allow_inf_nan=False)
+    notes: str
 
 
 class UploadPayload(BaseModel):

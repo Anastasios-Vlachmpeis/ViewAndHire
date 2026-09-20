@@ -9,6 +9,7 @@ from backend.db import init_db
 from backend.routers import interviews, listings
 
 init_db()
+interviews.recover_interrupted_jobs()
 
 app = FastAPI(title="ViewAndHire Mock Interview", version="1.0.0")
 app.include_router(listings.router)
