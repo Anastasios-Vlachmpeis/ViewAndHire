@@ -91,10 +91,10 @@ def _bbox_from_landmarks(landmarks: list, width: int, height: int) -> dict[str, 
     pad_x = (x_max - x_min) * 0.08
     pad_y = (y_max - y_min) * 0.08
     return {
-        "x": max(0.0, x_min - pad_x),
-        "y": max(0.0, y_min - pad_y),
-        "w": min(width, x_max + pad_x) - max(0.0, x_min - pad_x),
-        "h": min(height, y_max + pad_y) - max(0.0, y_min - pad_y),
+        "x": float(max(0.0, x_min - pad_x)),
+        "y": float(max(0.0, y_min - pad_y)),
+        "w": float(min(width, x_max + pad_x) - max(0.0, x_min - pad_x)),
+        "h": float(min(height, y_max + pad_y) - max(0.0, y_min - pad_y)),
     }
 
 
@@ -112,7 +112,7 @@ def _looking_at_camera(landmarks: list, width: int, height: int) -> bool:
     yaw_proxy = abs((left_eye[0] + right_eye[0]) / 2 - nose[0])
     pitch_proxy = abs(nose[1] - (left_eye[1] + right_eye[1]) / 2)
 
-    return left_offset < 0.018 and right_offset < 0.018 and yaw_proxy < 0.03 and pitch_proxy < 0.04
+    return bool(left_offset < 0.018 and right_offset < 0.018 and yaw_proxy < 0.03 and pitch_proxy < 0.04)
 
 
 def _predict_expression(frame: np.ndarray, bbox: dict[str, float]) -> tuple[str, float]:
@@ -172,7 +172,7 @@ def analyze_video(video_path: Path, sample_fps: float = 5.0) -> dict[str, Any]:
                     "bbox": bbox,
                     "expression": expression,
                     "expression_confidence": round(confidence, 3),
-                    "looking_at_camera": _looking_at_camera(landmarks, width, height),
+                    "looking_at_camera": bool(_looking_at_camera(landmarks, width, height)),
                 }
             )
         frames.append(entry)

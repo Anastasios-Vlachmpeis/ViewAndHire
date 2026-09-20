@@ -51,7 +51,7 @@ def transcribe_audio(wav_path: Path) -> dict[str, Any]:
 
 def save_transcript(interview_dir: Path, transcript: dict[str, Any]) -> Path:
     path = interview_dir / "transcript.json"
-    path.write_text(json.dumps(transcript, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(transcript, indent=2, default=lambda v: v.item() if hasattr(v, "item") else str(v)), encoding="utf-8")
     return path
 
 

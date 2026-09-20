@@ -120,7 +120,7 @@ Job context (truncated):
 {job_text[:1500]}
 
 Metrics JSON:
-{json.dumps(payload, indent=2)}
+{json.dumps(payload, indent=2, default=str)}
 
 Cover: overall impression, top strengths, top weak points to practice, and 3 concrete next steps.
 Do not diagnose medical conditions. Use phrasing like "delivery signals" not clinical labels.

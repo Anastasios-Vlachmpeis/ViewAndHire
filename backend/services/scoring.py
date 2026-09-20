@@ -24,6 +24,18 @@ def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
     return max(low, min(high, value))
 
 
+def _json_default(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def dumps(payload: Any) -> str:
+    return json.dumps(payload, indent=2, default=_json_default)
+
+
 def _write_pcm_wav(path: Path, samples: np.ndarray, sample_rate: int = 16000) -> None:
     clipped = np.clip(samples, -1.0, 1.0)
     pcm = (clipped * 32767).astype(np.int16)
@@ -191,7 +203,7 @@ def run_analysis(
             progress(stage, percent, message)
         status_path = interview_dir / "progress.json"
         status_path.write_text(
-            json.dumps({"stage": stage, "percent": percent, "message": message}),
+            dumps({"stage": stage, "percent": percent, "message": message}),
             encoding="utf-8",
         )
 
@@ -286,6 +298,6 @@ def run_analysis(
         "overview": overview,
     }
     analysis_path = interview_dir / "analysis.json"
-    analysis_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
+    analysis_path.write_text(dumps(analysis), encoding="utf-8")
     report("done", 100, "Analysis complete")
     return analysis

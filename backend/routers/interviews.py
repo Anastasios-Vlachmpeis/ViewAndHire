@@ -168,7 +168,20 @@ async def upload_recording(
     return {"status": "uploaded", "interview_id": interview_id}
 
 
-@router.post("/{interview_id}/save")
+@router.post("/{interview_id}/analyze")
+def reanalyze_interview(interview_id: str, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    interview = db.get_interview(interview_id)
+    if not interview:
+        raise HTTPException(status_code=404, detail="Interview not found")
+    interview_dir = settings.interviews_dir / interview_id
+    recording = interview_dir / "recording.webm"
+    timestamps_path = interview_dir / "timestamps.json"
+    if not recording.exists() or not timestamps_path.exists():
+        raise HTTPException(status_code=400, detail="Recording or timestamps missing")
+    ts_payload = json.loads(timestamps_path.read_text(encoding="utf-8"))
+    db.update_interview_status(interview_id, "uploaded")
+    background_tasks.add_task(_run_analysis_job, interview_id, ts_payload)
+    return {"status": "analyzing", "interview_id": interview_id}
 def save_interview(interview_id: str) -> dict[str, Any]:
     interview = db.get_interview(interview_id)
     if not interview:

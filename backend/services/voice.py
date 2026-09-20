@@ -56,7 +56,13 @@ def analyze_audio_segment(wav_path: str, transcript_text: str = "") -> dict[str,
         if label == "silent":
             start = call(silence_tg, "Get start time of interval", 1, i)
             end = call(silence_tg, "Get end time of interval", 1, i)
-            pauses.append({"start": start, "end": end, "duration": end - start})
+            pauses.append(
+                {
+                    "start": float(start),
+                    "end": float(end),
+                    "duration": float(end - start),
+                }
+            )
 
     pause_durations = [p["duration"] for p in pauses]
     total_pause = sum(pause_durations)
@@ -89,7 +95,7 @@ def analyze_audio_segment(wav_path: str, transcript_text: str = "") -> dict[str,
     )
 
     features = {
-        "duration": round(duration, 3),
+        "duration": round(float(duration), 3),
         "mean_f0": round(float(mean_f0) if mean_f0 == mean_f0 else 0.0, 2),
         "f0_stdev": round(float(stdev_f0) if stdev_f0 == stdev_f0 else 0.0, 2),
         "mean_intensity": round(float(mean_intensity) if mean_intensity == mean_intensity else 0.0, 2),
@@ -110,7 +116,7 @@ def analyze_audio_segment(wav_path: str, transcript_text: str = "") -> dict[str,
     }
 
     return {
-        "duration": duration,
+        "duration": float(duration),
         "score": round(delivery_score, 1),
         "features": features,
         "pauses": pauses,

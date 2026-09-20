@@ -12,7 +12,7 @@ const statusEl = document.getElementById("status");
 const uploadCard = document.getElementById("uploadCard");
 const uploadStatus = document.getElementById("uploadStatus");
 const progressBar = document.getElementById("progressBar");
-const progressMessage = document.getElementById("progressMessage");
+const retryBtn = document.getElementById("retryBtn");
 
 let interview = null;
 let mediaStream = null;
@@ -200,6 +200,7 @@ async function pollProgress() {
     uploadStatus.textContent = progress.message;
     if (progress.stage === "error") {
       uploadStatus.classList.add("error");
+      retryBtn.hidden = false;
       return;
     }
     if (progress.stage === "done") {
@@ -236,6 +237,19 @@ startBtn.addEventListener("click", async () => {
 
 skipBtn.addEventListener("click", skipQuestion);
 stopBtn.addEventListener("click", finishInterview);
+retryBtn.addEventListener("click", async () => {
+  retryBtn.hidden = true;
+  uploadStatus.classList.remove("error");
+  uploadStatus.textContent = "Retrying analysis...";
+  try {
+    await api(`/api/interviews/${interviewId}/analyze`, { method: "POST" });
+    pollProgress();
+  } catch (err) {
+    uploadStatus.classList.add("error");
+    uploadStatus.textContent = err.message;
+    retryBtn.hidden = false;
+  }
+});
 
 async function init() {
   if (!interviewId) {
