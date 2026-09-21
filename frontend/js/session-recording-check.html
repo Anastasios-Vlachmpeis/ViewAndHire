@@ -40,9 +40,31 @@
       </div>
     </div>
   </main>
-  <script src="/js/api.js"></script>
+  <pre id="checkResult">Waiting for browser recording check</pre><script>
+const config={id:'test',status:'pending',settings:{record_mode:'both',prep_seconds:30,answer_seconds:2},selected_questions:[{id:'q1',question:'Synthetic answer one'},{id:'q2',question:'Synthetic answer two'}]};
+const getQueryParam=()=> 'test', getSession=()=>null, setSession=()=>{};
+const api=async url=>url.endsWith('/progress')?{stage:'score',percent:100,message:'Local recording check finished'}:config;
+class LiveGazeOverlay {start(){} stop(){}}
+let audioContext, sourceCanvas, canvasTimer, tone;
+navigator.mediaDevices.getUserMedia=async()=>{
+ audioContext=new AudioContext(); await audioContext.resume();
+ const dest=audioContext.createMediaStreamDestination(); tone=audioContext.createOscillator(); tone.connect(dest); tone.start();
+ sourceCanvas=document.createElement('canvas'); sourceCanvas.width=320;sourceCanvas.height=240;
+ const paint=()=>{const c=sourceCanvas.getContext('2d');c.fillStyle=phase==='answer'?'green':'orange';c.fillRect(0,0,320,240);c.fillStyle='white';c.font='24px sans-serif';c.fillText(phase==='answer'?'ANSWER':'PREPARATION',20,120);};paint();canvasTimer=setInterval(paint,50);
+ return new MediaStream([...sourceCanvas.captureStream(20).getVideoTracks(),...dest.stream.getAudioTracks()]);
+};
+window.fetch=async(url,options)=>{
+ const blob=options.body.get('recording');
+ const audio=await audioContext.decodeAudioData(await blob.arrayBuffer());
+ const times=JSON.parse(options.body.get('timestamps'));
+ const result={duration:audio.duration,timestamps:times,bytes:blob.size,passed:Math.abs(audio.duration-4)<.35&&times[1].answer_start<2.35&&times[1].answer_end<4.35};
+ document.getElementById('checkResult').textContent=JSON.stringify(result);
+ clearInterval(canvasTimer);tone.stop();await audioContext.close();
+ return {ok:true};
+};
+</script>
   <script src="/js/head-movement.js"></script>
-  <script src="/js/live-gaze.js"></script>
+  
   <script src="/js/session.js"></script>
 </body>
 </html>

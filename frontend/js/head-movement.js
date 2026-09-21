@@ -72,23 +72,8 @@ const HeadMovement = (() => {
     return frames.map((frame) => tracker.update(frame, frame.time));
   }
 
-  function bind(select, help, onChange) {
-    let saved = "balanced";
-    try { saved = localStorage.getItem("headMovementSensitivity") || saved; } catch (_) { /* Storage may be unavailable. */ }
-    select.value = presets[saved] ? saved : "balanced";
-    const change = () => {
-      const value = presets[select.value] ? select.value : "balanced";
-      const threshold = presets[value];
-      help.textContent = `Detects smaller movements at High sensitivity. Current threshold: about ${threshold.rotation}° of rotation or ${Math.round(threshold.position * 100)}% of face size in position change. Descriptive only; no score impact.`;
-      try { localStorage.setItem("headMovementSensitivity", value); } catch (_) { /* Keep the current page functional. */ }
-      onChange(value);
-    };
-    select.addEventListener("change", change);
-    change();
-  }
-
   function label(result) {
     return { moving: "Moving", steady: "Steady", uncertain: "Uncertain" }[result?.state] || "Uncertain";
   }
-  return { Tracker, analyzeFrames, bind, label, presets };
+  return { Tracker, analyzeFrames, label, presets };
 })();

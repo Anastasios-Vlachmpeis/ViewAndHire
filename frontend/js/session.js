@@ -16,8 +16,6 @@ const progressMessage = document.getElementById("progressMessage");
 const retryBtn = document.getElementById("retryBtn");
 const liveGaze = new LiveGazeOverlay(preview, document.getElementById("liveFaceOverlay"),
   document.getElementById("liveGazeLabels"), document.getElementById("liveGazeStatus"));
-HeadMovement.bind(document.getElementById("headMovementSensitivity"), document.getElementById("headMovementHelp"),
-  (value) => liveGaze.setHeadSensitivity(value));
 startBtn.disabled = true;
 
 let interview = null;
@@ -26,7 +24,8 @@ let mediaRecorder = null;
 let chunks = [];
 let questionIndex = 0;
 let timerInterval = null;
-let sessionStart = 0;
+let recordedSeconds = 0;
+let recordingStartedAt = null;
 let phase = "idle";
 let phaseEndsAt = 0;
 let timestamps = [];
@@ -41,7 +40,7 @@ function formatTime(seconds) {
 }
 
 function nowSeconds() {
-  return (performance.now() - sessionStart) / 1000;
+  return recordedSeconds + (recordingStartedAt === null ? 0 : (performance.now() - recordingStartedAt) / 1000);
 }
 
 async function setupMedia() {
@@ -54,6 +53,7 @@ async function setupMedia() {
   if (constraints.video) {
     previewWrap.hidden = false;
     preview.srcObject = mediaStream;
+    await preview.play();
   }
 }
 
@@ -65,14 +65,26 @@ function pickMimeType(mode) {
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || "video/webm";
 }
 
-function startRecording() {
+function prepareRecording() {
   chunks = [];
   const mimeType = pickMimeType(interview.settings.record_mode);
   mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
   mediaRecorder.ondataavailable = (event) => {
     if (event.data.size > 0) chunks.push(event.data);
   };
-  mediaRecorder.start(1000);
+}
+
+function resumeRecording() {
+  if (mediaRecorder.state === "inactive") mediaRecorder.start(1000);
+  else if (mediaRecorder.state === "paused") mediaRecorder.resume();
+  recordingStartedAt = performance.now();
+}
+
+function pauseRecording() {
+  if (recordingStartedAt === null) return;
+  recordedSeconds = nowSeconds();
+  recordingStartedAt = null;
+  if (mediaRecorder.state === "recording") mediaRecorder.pause();
 }
 
 function stopRecording() {
@@ -95,8 +107,9 @@ function updateTimer() {
 }
 
 function beginPrep() {
+  pauseRecording();
   phase = "prep";
-  statusEl.textContent = "Recording in progress.";
+  statusEl.textContent = "Preparation only — not recording. Recording starts when the answer timer begins.";
   skipBtn.textContent = "Skip question";
   stopBtn.textContent = "Finish & analyze";
   const q = interview.selected_questions[questionIndex];
@@ -116,8 +129,10 @@ function beginPrep() {
 }
 
 function beginAnswer() {
+  resumeRecording();
   phase = "answer";
   phaseLabel.textContent = "Answer";
+  statusEl.textContent = "Recording your answer.";
   const ts = {
     question_id: interview.selected_questions[questionIndex].id,
     question_index: questionIndex,
@@ -147,6 +162,7 @@ function onPhaseComplete() {
     return;
   }
   if (phase === "answer") {
+    pauseRecording();
     timestamps[questionIndex].answer_end = nowSeconds();
     questionIndex += 1;
     if (questionIndex >= interview.selected_questions.length) {
@@ -170,6 +186,7 @@ function skipQuestion() {
       answer_end: skippedAt,
     };
   } else if (phase === "answer") {
+    pauseRecording();
     timestamps[questionIndex].answer_end = nowSeconds();
   }
   questionIndex += 1;
@@ -183,6 +200,7 @@ function skipQuestion() {
 async function finishInterview() {
   if (phase === "done" || phase === "idle") return;
   clearInterval(timerInterval);
+  pauseRecording();
   const current = timestamps[questionIndex];
   if (current && phase === "answer") current.answer_end = nowSeconds();
   if (current && phase === "prep") current.answer_start = current.answer_end = nowSeconds();
@@ -198,6 +216,19 @@ async function finishInterview() {
   recordingBlob = await stopRecording();
   if (mediaStream) {
     mediaStream.getTracks().forEach((track) => track.stop());
+  }
+
+  if (recordedSeconds <= 0 || recordingBlob.size === 0) {
+    phase = "idle";
+    phaseLabel.textContent = "No answers recorded";
+    timerEl.textContent = "--";
+    statusEl.textContent = "Preparation is not recorded. Begin again and answer at least one question to get feedback.";
+    uploadCard.hidden = true;
+    startBtn.hidden = false;
+    startBtn.disabled = false;
+    preview.srcObject = null;
+    previewWrap.hidden = true;
+    return;
   }
 
   try {
@@ -255,10 +286,12 @@ startBtn.addEventListener("click", async () => {
   statusEl.textContent = "Requesting camera/microphone access...";
   try {
     await setupMedia();
-    sessionStart = performance.now();
-    startRecording();
+    recordedSeconds = 0;
+    recordingStartedAt = null;
+    prepareRecording();
     timestamps = [];
     questionIndex = 0;
+    startBtn.hidden = true;
     beginPrep();
     if (interview.settings.record_mode !== "mic") liveGaze.start();
   } catch (err) {

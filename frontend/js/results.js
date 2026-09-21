@@ -12,16 +12,11 @@ const overlayLabels = document.getElementById("overlayLabels");
 
 let analysis = null;
 let faceFrames = [];
-let headSensitivity = "balanced";
 let headMovementByFrame = new Map();
 function rebuildHeadMovement() {
-  const results = HeadMovement.analyzeFrames(faceFrames, headSensitivity);
+  const results = HeadMovement.analyzeFrames(faceFrames, "balanced");
   headMovementByFrame = new Map(faceFrames.map((frame, index) => [frame, results[index]]));
 }
-HeadMovement.bind(document.getElementById("headMovementSensitivity"), document.getElementById("headMovementHelp"), (value) => {
-  headSensitivity = value;
-  rebuildHeadMovement();
-});
 
 function renderAggregate(agg) {
   const cards = [

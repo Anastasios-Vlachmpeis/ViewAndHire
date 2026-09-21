@@ -73,34 +73,3 @@ test("rotation crossing the angle boundary does not become a full turn", () => {
   const frames = Array.from({length:8}, (_,i) => frame(i*.2, {yaw:i < 5 ? 179 : -179}));
   assert.equal(run(frames).at(-1).state, "steady");
 });
-
-test("controls tolerate disabled storage", () => {
-  const settings = {value:"", addEventListener(event, fn) {this.change=fn;}};
-  const help = {};
-  let value;
-  motion.bind(settings, help, (v) => {value=v;});
-  assert.equal(value, "balanced");
-  settings.value="high"; settings.change();
-  assert.equal(value, "high");
-  assert.match(help.textContent, /3°/);
-});
-
-test("controls restore and persist the shared sensitivity preference", () => {
-  const stored = new Map([["headMovementSensitivity", "low"]]);
-  context.localStorage = {getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value)};
-  try {
-    const settings = {value:"", addEventListener(event, fn) {this.change=fn;}};
-    const help = {};
-    let value;
-    motion.bind(settings, help, v => {value=v;});
-    assert.equal(settings.value, "low");
-    assert.equal(value, "low");
-    settings.value="high"; settings.change();
-    assert.equal(stored.get("headMovementSensitivity"), "high");
-    stored.set("headMovementSensitivity", "invalid");
-    motion.bind(settings, help, v => {value=v;});
-    assert.equal(value, "balanced");
-  } finally {
-    delete context.localStorage;
-  }
-});

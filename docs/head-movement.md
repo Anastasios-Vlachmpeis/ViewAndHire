@@ -2,7 +2,7 @@
 
 Live preview and replay show **Head movement: Moving / Steady / Uncertain** separately from facial movement, head direction and estimated eye contact. It describes recent changes, not emotional state or answer quality, and never affects scores.
 
-The sensitivity control is available on both pages and remembered in this browser:
+Both pages use Balanced sensitivity with no selection control. Previously saved browser sensitivity preferences are ignored. The tracker retains these internal presets:
 
 | Sensitivity | Rotation threshold | Position threshold |
 | --- | --- | --- |
@@ -10,7 +10,7 @@ The sensitivity control is available on both pages and remembered in this browse
 | Balanced (default) | 6 degrees | 6% of face size |
 | Low | 10 degrees | 10% of face size |
 
-Choose High to pick up smaller movements. These are adjustable engineering thresholds, not validated accuracy claims.
+Balanced detects changes of at least 6 degrees or 6% of face size. These are engineering thresholds, not validated accuracy claims.
 
 ## Calculation
 
@@ -20,7 +20,7 @@ Three-sample median filtering suppresses isolated tracking jumps. The tracker me
 
 Missing or invalid poses, lost faces, gaps over 0.6 seconds, backwards timestamps and changes in image dimensions reset the tracker to Uncertain. Duplicate timestamps do not add samples. Live stale-frame handling also clears tracking.
 
-Replay precomputes states from the saved chronological frames, so pausing or seeking cannot create movement. Changing sensitivity recalculates these states locally. Existing recordings with valid saved poses and face boxes need no new analysis, model download or feedback request. Recordings without that data show Uncertain.
+Replay precomputes states locally from the saved chronological frames using Balanced sensitivity, so pausing or seeking cannot create movement. Existing recordings with valid saved poses and face boxes need no new analysis, model download or feedback request. Recordings without that data show Uncertain.
 
 ## Limitations and verification
 

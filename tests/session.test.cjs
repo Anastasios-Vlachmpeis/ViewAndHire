@@ -23,6 +23,7 @@ async function session(mode = "both") {
       if (!elements.has(id)) elements.set(id, {
         hidden: true, style: {}, classList: { add() {}, remove() {} },
         handlers: {}, addEventListener(event, fn) { this.handlers[event] = fn; },
+        async play() { this.played = true; },
       });
       return elements.get(id);
     } },
@@ -35,6 +36,8 @@ async function session(mode = "both") {
       static isTypeSupported() { return true; }
       constructor() { this.state = "inactive"; }
       start() { this.state = "recording"; }
+      pause() { this.state = "paused"; }
+      resume() { this.state = "recording"; }
       stop() { this.state = "inactive"; this.ondataavailable({ data: new Blob(["recording"]) }); this.onstop(); }
     },
     Blob, FormData,
@@ -64,11 +67,17 @@ test("every recording mode starts question preparation immediately without calib
     assert.equal(s.elements.get("questionText").textContent, "First");
     assert.equal(s.elements.get("timer").textContent, "00:01");
     assert.equal(s.intervals.size, 1);
+    assert.equal(s.run("mediaRecorder.state"), "inactive");
+    if (mode !== "mic") {
+      assert.equal(s.elements.get("previewWrap").hidden, false);
+      assert.equal(s.elements.get("preview").played, true);
+      assert.ok(s.elements.get("preview").srcObject);
+    }
     s.at(1000); s.run("onPhaseComplete()");
     s.at(6000); await s.run("finishInterview()");
     const form = s.requests[0].options.body;
     assert.equal(form.has("calibration"), false);
-    assert.equal(JSON.parse(form.get("timestamps"))[0].answer_start, 1);
+    assert.equal(JSON.parse(form.get("timestamps"))[0].answer_start, 0);
   }
 });
 
@@ -80,8 +89,8 @@ test("stopping during an answer records its end and uploads once", async () => {
   await s.run("finishInterview()");
   assert.equal(s.requests.length, 1);
   const timestamps = JSON.parse(s.requests[0].options.body.get("timestamps"));
-  assert.equal(timestamps[0].answer_start, 1);
-  assert.equal(timestamps[0].answer_end, 6);
+  assert.equal(timestamps[0].answer_start, 0);
+  assert.equal(timestamps[0].answer_end, 5);
   assert.equal(s.intervals.size, 0);
 });
 
@@ -89,44 +98,88 @@ test("natural question transitions maintain exactly one timer", async () => {
   const s = await session();
   await s.start();
   s.at(1000); s.run("onPhaseComplete()");
+  assert.equal(s.run("mediaRecorder.state"), "recording");
   assert.equal(s.intervals.size, 1);
   s.at(16000); s.run("onPhaseComplete()");
   assert.equal(s.intervals.size, 1);
-  assert.equal(s.run("timestamps[1].prep_start"), 16);
+  assert.equal(s.run("timestamps[1].prep_start"), 15);
+  assert.equal(s.run("mediaRecorder.state"), "paused");
+  assert.equal(s.elements.get("previewWrap").hidden, false);
   s.at(17000); s.run("onPhaseComplete()");
   s.at(32000); s.run("onPhaseComplete()");
   await Promise.resolve(); await Promise.resolve();
   assert.equal(s.intervals.size, 0);
-  assert.equal(s.run("timestamps[1].answer_end"), 32);
+  assert.equal(s.run("timestamps[1].answer_start"), 15);
+  assert.equal(s.run("timestamps[1].answer_end"), 30);
 });
 
 test("skip during preparation has zero answer duration", async () => {
   const s = await session();
   await s.start();
   s.at(500); s.run("skipQuestion()");
-  assert.equal(s.run("timestamps[0].answer_start"), 0.5);
-  assert.equal(s.run("timestamps[0].answer_end"), 0.5);
-  assert.equal(s.run("timestamps[1].prep_start"), 0.5);
+  assert.equal(s.run("timestamps[0].answer_start"), 0);
+  assert.equal(s.run("timestamps[0].answer_end"), 0);
+  assert.equal(s.run("timestamps[1].prep_start"), 0);
+  assert.equal(s.run("mediaRecorder.state"), "inactive");
   assert.equal(s.intervals.size, 1);
 });
 
-test("stop during preparation creates an empty answer instead of a negative interval", async () => {
+test("stop before any answer avoids empty upload and allows another attempt", async () => {
   const s = await session();
   await s.start();
   s.at(500); await s.run("finishInterview()");
-  assert.equal(s.run("timestamps[0].answer_start"), 0.5);
-  assert.equal(s.run("timestamps[0].answer_end"), 0.5);
+  assert.equal(s.run("timestamps[0].answer_start"), 0);
+  assert.equal(s.run("timestamps[0].answer_end"), 0);
+  assert.equal(s.requests.length, 0);
+  assert.equal(s.run("phase"), "idle");
+  assert.equal(s.elements.get("startBtn").disabled, false);
+  await s.start();
+  assert.equal(s.run("nowSeconds()"), 0);
 });
 
 test("upload HTTP errors offer upload retry and do not start polling", async () => {
   const s = await session();
   s.context.fetch = async () => ({ ok: false, status: 400, json: async () => ({ detail: "Invalid recording" }) });
   await s.start();
-  s.at(200); await s.run("finishInterview()");
+  s.at(1000); s.run("onPhaseComplete()");
+  s.at(1200); await s.run("finishInterview()");
   assert.match(s.elements.get("uploadStatus").textContent, /Invalid recording/);
   assert.equal(s.elements.get("retryBtn").hidden, false);
   assert.equal(s.elements.get("retryBtn").textContent, "Retry upload");
   assert.equal(s.timeouts.size, 0);
+});
+
+test("thirty-second prep intervals stay out of the saved answer timeline", async () => {
+  const s = await session();
+  s.run("interview.settings.prep_seconds = 30");
+  await s.start();
+  s.at(30000); s.run("onPhaseComplete()");
+  s.at(35000); s.run("skipQuestion()");
+  assert.equal(s.run("mediaRecorder.state"), "paused");
+  s.at(65000); s.run("onPhaseComplete()");
+  s.at(72000); await s.run("finishInterview()");
+  const times = JSON.parse(s.requests[0].options.body.get("timestamps"));
+  assert.deepEqual(times.map(t => [t.prep_start, t.answer_start, t.answer_end]), [[0, 0, 5], [5, 5, 12]]);
+});
+
+test("finishing during later preparation preserves only the earlier answer", async () => {
+  const s = await session();
+  await s.start();
+  s.at(1000); s.run("onPhaseComplete()");
+  s.at(16000); s.run("onPhaseComplete()");
+  s.at(16500); await s.run("finishInterview()");
+  const times = JSON.parse(s.requests[0].options.body.get("timestamps"));
+  assert.deepEqual(times.map(t => [t.answer_start, t.answer_end]), [[0, 15], [15, 15]]);
+});
+
+test("skipping every preparation never starts recording or uploads", async () => {
+  const s = await session();
+  await s.start();
+  s.run("skipQuestion()"); s.run("skipQuestion()");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(s.requests.length, 0);
+  assert.equal(s.run("mediaRecorder.state"), "inactive");
+  assert.equal(s.run("phase"), "idle");
 });
 
 test("progress updates and network failures both keep polling functional", async () => {

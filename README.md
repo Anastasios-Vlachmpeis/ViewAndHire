@@ -39,11 +39,13 @@ Open http://127.0.0.1:8000
 
 1. **Listing** — paste job post, optionally add your own questions (one per line), and generate a combined question bank
 2. **Settings** — timers, question selection, recording mode
-3. **Session** — prep/answer timers and continuous recording, with no calibration step
+3. **Session** — camera preview during preparation; recording only during answer timers, with no calibration step
 4. **Results** — scores, replay with face box, save interview
 5. **History** — reopen saved sessions or retake with the same or different questions from their full saved bank
 
 Saving an interview retains its entire generated and custom question bank, including questions not used in that attempt. Choose **Retake** in History or **Retake interview** on Results to select questions and adjust timers. Previous questions and settings are restored by default. Every retake creates a separate recording and result; the original attempt stays intact.
+
+Preparation keeps the camera preview visible in camera modes, but saves no audio or video. Recording starts with the first answer and pauses between questions. Saved timestamps count only recorded answer time, so replay and feedback exclude preparation. Finishing before any answer lets you begin again without uploading an empty recording. Existing saved recordings are unchanged.
 
 ## Privacy
 
@@ -52,7 +54,7 @@ Recordings stay in `data/interviews/`. Job listing text, questions, transcripts,
 ## Notes
 
 - Live preview and replay separate head orientation from estimated eye contact (Toward camera / Away / Uncertain).
-- A separate **Head movement** overlay tracks rotation and position changes. Choose High, Balanced (default), or Low sensitivity in the session or replay; the preference is remembered. Existing recordings with saved head poses work immediately. See [movement thresholds and limitations](docs/head-movement.md).
+- A separate **Head movement** overlay tracks rotation and position changes. Live preview and replay use Balanced sensitivity with no selection control; previously saved sensitivity preferences are ignored. Existing recordings with saved head poses work immediately. See [movement thresholds and limitations](docs/head-movement.md).
 - Speech "confidence" uses acoustic proxies (pitch, pauses, fillers).
 - First analysis run downloads Whisper and face model weights.
 - Run one server worker for this local app. Interrupted analyses become retryable after a restart.
